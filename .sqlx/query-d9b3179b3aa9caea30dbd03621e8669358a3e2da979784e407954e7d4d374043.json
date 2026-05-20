@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO apps (id, device_id, bundle_id, display_name, version, ipa_path, account_id)\n           VALUES (?, ?, ?, ?, ?, ?, ?)\n           ON CONFLICT(device_id, bundle_id) DO UPDATE SET\n             display_name = excluded.display_name,\n             version = excluded.version,\n             ipa_path = COALESCE(excluded.ipa_path, apps.ipa_path),\n             account_id = COALESCE(excluded.account_id, apps.account_id)\n           RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d9b3179b3aa9caea30dbd03621e8669358a3e2da979784e407954e7d4d374043"
+}

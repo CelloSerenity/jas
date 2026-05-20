@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM apple_accounts WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "15aa8b0feb33f9bc22934a74e08351e3a7001bcac56cad373c919c1d22ef6dd9"
+}

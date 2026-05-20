@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT session_blob FROM apple_accounts WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_blob",
+        "ordinal": 0,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "73b95d99c3e7daef69d0e385824d278bbca7df7f85e2b22e7a8b7a3edbbb061e"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM sideload_storage WHERE key = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "0b421b60fdefad3cdf1c76d252e2fff04eb99ed7e71505af1587f8a0a2c7976f"
+}

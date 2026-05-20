@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO jobs (id, app_id, kind, status) VALUES (?, ?, ?, 'queued')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "8d159d207a29772ee81c1f005eae9654c70874b294f5ffe2991afd904574ac31"
+}

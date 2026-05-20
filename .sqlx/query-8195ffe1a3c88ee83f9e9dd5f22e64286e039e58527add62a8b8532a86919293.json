@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, device_id, bundle_id, display_name, version, ipa_path,\n                  account_id, installed_at, last_refreshed,\n                  refresh_enabled as \"refresh_enabled: bool\"\n           FROM apps WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "device_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "bundle_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "display_name",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "version",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "ipa_path",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "account_id",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "installed_at",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_refreshed",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "refresh_enabled: bool",
+        "ordinal": 9,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "8195ffe1a3c88ee83f9e9dd5f22e64286e039e58527add62a8b8532a86919293"
+}

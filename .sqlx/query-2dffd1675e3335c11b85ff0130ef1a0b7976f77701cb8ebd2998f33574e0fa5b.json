@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, name, udid, ip, port, pairing_blob, last_seen, discovery, mdns_ip, mdns_seen_at\n           FROM devices ORDER BY name",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "udid",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "ip",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "port",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "pairing_blob",
+        "ordinal": 5,
+        "type_info": "Blob"
+      },
+      {
+        "name": "last_seen",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "discovery",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "mdns_ip",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "mdns_seen_at",
+        "ordinal": 9,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "2dffd1675e3335c11b85ff0130ef1a0b7976f77701cb8ebd2998f33574e0fa5b"
+}

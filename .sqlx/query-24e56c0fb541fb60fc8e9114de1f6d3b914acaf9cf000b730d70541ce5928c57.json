@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE devices SET mdns_ip = ?, mdns_seen_at = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "24e56c0fb541fb60fc8e9114de1f6d3b914acaf9cf000b730d70541ce5928c57"
+}

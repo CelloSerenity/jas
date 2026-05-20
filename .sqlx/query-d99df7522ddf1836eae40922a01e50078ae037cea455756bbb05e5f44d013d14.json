@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO apple_accounts (id, apple_id, session_blob, team_id, team_name)\n           VALUES (?, ?, ?, ?, ?)\n           ON CONFLICT(apple_id) DO UPDATE SET\n             session_blob = excluded.session_blob,\n             team_id = excluded.team_id,\n             team_name = excluded.team_name",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "d99df7522ddf1836eae40922a01e50078ae037cea455756bbb05e5f44d013d14"
+}

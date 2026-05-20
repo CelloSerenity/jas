@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE apps SET installed_at = COALESCE(installed_at, ?), last_refreshed = ?\n               WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "4225f721f85004dd89fcf763fc24d236c0843b1c02643f4e660f6e4c55a8b040"
+}

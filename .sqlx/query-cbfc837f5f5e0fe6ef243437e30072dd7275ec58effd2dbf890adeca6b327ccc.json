@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE jobs SET app_id = ? WHERE app_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "cbfc837f5f5e0fe6ef243437e30072dd7275ec58effd2dbf890adeca6b327ccc"
+}

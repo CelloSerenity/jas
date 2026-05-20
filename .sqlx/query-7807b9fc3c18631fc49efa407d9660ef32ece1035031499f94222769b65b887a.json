@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE apps SET bundle_id = ?, installed_at = COALESCE(installed_at, ?),\n               last_refreshed = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "7807b9fc3c18631fc49efa407d9660ef32ece1035031499f94222769b65b887a"
+}

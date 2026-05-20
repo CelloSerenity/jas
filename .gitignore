@@ -12,6 +12,5 @@ target/
 *.dm
 
 ipas
-.sqlx
 jas.db*
 jas.toml

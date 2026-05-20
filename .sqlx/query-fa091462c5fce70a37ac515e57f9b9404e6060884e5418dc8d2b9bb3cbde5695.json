@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT device_id, bundle_id, display_name, version, ipa_path, account_id\n           FROM apps WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "device_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "bundle_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "display_name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "version",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "ipa_path",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "account_id",
+        "ordinal": 5,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "fa091462c5fce70a37ac515e57f9b9404e6060884e5418dc8d2b9bb3cbde5695"
+}

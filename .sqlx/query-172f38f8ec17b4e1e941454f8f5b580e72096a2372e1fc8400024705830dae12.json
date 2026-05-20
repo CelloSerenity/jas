@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE apps SET refresh_enabled = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "172f38f8ec17b4e1e941454f8f5b580e72096a2372e1fc8400024705830dae12"
+}
