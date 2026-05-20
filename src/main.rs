@@ -64,7 +64,16 @@ async fn main() {
 
     // Build Leptos + Axum router.
     let conf = get_configuration(None).unwrap();
-    let addr = conf.leptos_options.site_addr;
+    let addr = match config.server.bind.parse() {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::warn!(
+                "Invalid server.bind {:?} in jas.toml ({e}); falling back to Leptos site_addr",
+                config.server.bind
+            );
+            conf.leptos_options.site_addr
+        }
+    };
     let leptos_options = conf.leptos_options;
     let routes = generate_route_list(App);
 
