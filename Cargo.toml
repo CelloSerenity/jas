@@ -1,0 +1,132 @@
+[package]
+name = "jas"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+leptos = { version = "0.8.0" }
+leptos_router = { version = "0.8.0" }
+leptos_meta = { version = "0.8.0" }
+axum = { version = "0.8.0", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+leptos_axum = { version = "0.8.0", optional = true }
+tokio = { version = "1", features = [
+  "rt-multi-thread",
+  "sync",
+  "fs",
+  "time",
+  "macros",
+], optional = true }
+wasm-bindgen = { version = "0.2.106", optional = true }
+web-sys = { version = "0.3", features = [
+  "File",
+  "FileList",
+  "FileReader",
+  "HtmlInputElement",
+  "EventTarget",
+  "Window",
+], optional = true }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = { version = "2" }
+base64 = { version = "0.22" }
+
+# SSR-only
+isideload = { git = "https://github.com/jkcoxson/isideload", branch = "feature/rsd", optional = true, default-features = false, features = [
+  "install",
+] }
+idevice = { version = "0.1.61", optional = true, features = [
+  "tcp",
+  "tunnel_tcp_stack",
+  "afc",
+  "installation_proxy",
+  "misagent",
+  "remote_pairing",
+  "rsd",
+] }
+sqlx = { version = "0.8", features = [
+  "sqlite",
+  "runtime-tokio",
+  "macros",
+  "chrono",
+  "uuid",
+], optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = [
+  "env-filter",
+], optional = true }
+aes-gcm = { version = "0.10", optional = true }
+rand = { version = "0.8", optional = true }
+toml = { version = "0.8", optional = true }
+uuid = { version = "1", features = ["v4", "serde"], optional = true }
+anyhow = { version = "1", optional = true }
+sha2 = { version = "0.11", optional = true }
+hex = { version = "0.4", optional = true }
+rootcause = { version = "0.12", optional = true }
+mdns-sd = { version = "0.13", optional = true }
+plist = { version = "1", optional = true }
+zip = { version = "2", default-features = false, features = [
+  "deflate",
+], optional = true }
+
+[features]
+hydrate = [
+  "leptos/hydrate",
+  "dep:console_error_panic_hook",
+  "dep:wasm-bindgen",
+  "dep:web-sys",
+]
+ssr = [
+  "dep:axum",
+  "dep:tokio",
+  "dep:leptos_axum",
+  "leptos/ssr",
+  "leptos_meta/ssr",
+  "leptos_router/ssr",
+  "dep:isideload",
+  "dep:idevice",
+  "dep:sqlx",
+  "dep:tracing",
+  "dep:tracing-subscriber",
+  "dep:aes-gcm",
+  "dep:rand",
+  "dep:toml",
+  "dep:uuid",
+  "dep:anyhow",
+  "dep:sha2",
+  "dep:hex",
+  "dep:rootcause",
+  "dep:mdns-sd",
+  "dep:plist",
+  "dep:zip",
+]
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = 'z'
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[package.metadata.leptos]
+output-name = "jas"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+style-file = "style/main.scss"
+assets-dir = "public"
+site-addr = "127.0.0.1:3000"
+reload-port = 3001
+end2end-cmd = "npx playwright test"
+end2end-dir = "end2end"
+browserquery = "defaults"
+env = "DEV"
+bin-features = ["ssr"]
+bin-default-features = false
+lib-features = ["hydrate"]
+lib-default-features = false
+lib-profile-release = "wasm-release"
