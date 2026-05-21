@@ -1,0 +1,76 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install OpenSSL on ubuntu-24.04-arm
+        if: matrix.os == 'ubuntu-24.04-arm'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev
+
+      - name: Cache cargo registry and git dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-leptos
+        run: cargo install cargo-leptos
+
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Build with leptos
+        run: cargo leptos build --release
+
+      - name: Stage build artifacts
+        shell: bash
+        run: |
+          mkdir -p dist/target
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/release/jas.exe dist/jas.exe
+          else
+            cp target/release/jas dist/jas
+          fi
+          cp -r target/site dist/target/site
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: jas-${{ matrix.os }}
+          path: dist
