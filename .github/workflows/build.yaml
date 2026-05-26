@@ -14,14 +14,19 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            artifact: linux-x86_64
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+            artifact: linux-arm64
           - os: macos-latest
             target: aarch64-apple-darwin
+            artifact: macos-arm64
           - os: macos-15-intel
             target: x86_64-apple-darwin
+            artifact: macos-x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            artifact: windows
 
     runs-on: ${{ matrix.os }}
 
@@ -72,5 +77,5 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: jas-${{ matrix.os }}
+          name: jas-${{ matrix.artifact }}
           path: dist
