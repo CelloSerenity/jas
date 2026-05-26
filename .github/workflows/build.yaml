@@ -50,7 +50,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Install cargo-leptos
-        run: cargo install cargo-leptos
+        run: cargo install --locked cargo-leptos
 
       - name: Add wasm target
         run: rustup target add wasm32-unknown-unknown
