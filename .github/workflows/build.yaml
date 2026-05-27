@@ -26,7 +26,7 @@ jobs:
             artifact: macos-x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: windows
+            artifact: windows-x86_64
 
     runs-on: ${{ matrix.os }}
 
@@ -36,6 +36,8 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
       - name: Install OpenSSL on ubuntu-24.04-arm
         if: matrix.os == 'ubuntu-24.04-arm'
@@ -56,9 +58,6 @@ jobs:
 
       - name: Install cargo-leptos
         run: cargo install --locked cargo-leptos
-
-      - name: Add wasm target
-        run: rustup target add wasm32-unknown-unknown
 
       - name: Build with leptos
         run: cargo leptos build --release
