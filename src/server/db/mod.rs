@@ -136,6 +136,20 @@ pub async fn insert_device(
     Ok(())
 }
 
+pub async fn update_device_ip(pool: &SqlitePool, id: &str, ip: &str) -> sqlx::Result<()> {
+    sqlx::query!("UPDATE devices SET ip = ? WHERE id = ?", ip, id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn update_device_pairing(pool: &SqlitePool, id: &str, blob: &[u8]) -> sqlx::Result<()> {
+    sqlx::query!("UPDATE devices SET pairing_blob = ? WHERE id = ?", blob, id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn delete_device(pool: &SqlitePool, id: &str) -> sqlx::Result<()> {
     sqlx::query!("DELETE FROM devices WHERE id = ?", id)
         .execute(pool)
