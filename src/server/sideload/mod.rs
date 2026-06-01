@@ -218,6 +218,7 @@ pub fn account_storage_prefix(apple_id: &str) -> String {
 pub async fn build_anisette_provider(
     pool: &SqlitePool,
     apple_id: &str,
+    anisette_url: &str,
 ) -> anyhow::Result<RemoteV3AnisetteProvider> {
     let prefix = account_storage_prefix(apple_id);
     let storage = DbStorage::load(pool.clone(), &prefix)
@@ -226,6 +227,7 @@ pub async fn build_anisette_provider(
 
     Ok(RemoteV3AnisetteProvider::default()
         .map_err(|e| anyhow::anyhow!("Anisette init failed: {e}"))?
+        .set_url(anisette_url)
         .set_storage(Box::new(storage)))
 }
 
@@ -234,12 +236,13 @@ pub async fn restore_account(
     apple_id: &str,
     encrypted_spd: &[u8],
     crypto: &Crypto,
+    anisette_url: &str,
 ) -> anyhow::Result<AppleAccount> {
     let spd_bytes = crypto
         .decrypt(encrypted_spd)
         .map_err(|_| anyhow::anyhow!("Failed to decrypt account session"))?;
 
-    let provider = build_anisette_provider(pool, apple_id).await?;
+    let provider = build_anisette_provider(pool, apple_id, anisette_url).await?;
 
     let anisette_generator = isideload::anisette::AnisetteDataGenerator::new(std::sync::Arc::new(
         tokio::sync::RwLock::new(provider),
@@ -328,12 +331,13 @@ pub async fn get_dev_session(
     apple_id: &str,
     encrypted_spd: &[u8],
     crypto: &Crypto,
+    anisette_url: &str,
 ) -> anyhow::Result<DeveloperSession> {
     let storage = DbStorage::load(pool.clone(), &account_storage_prefix(apple_id))
         .await
         .map_err(|e| anyhow::anyhow!("Storage load failed: {e}"))?;
 
-    let provider = build_anisette_provider(pool, apple_id).await?;
+    let provider = build_anisette_provider(pool, apple_id, anisette_url).await?;
     let anisette_generator =
         AnisetteDataGenerator::new(std::sync::Arc::new(tokio::sync::RwLock::new(provider)));
 
@@ -369,7 +373,7 @@ pub async fn get_dev_session(
     }
 
     // if failure, remint xcode token
-    let mut account = restore_account(pool, apple_id, encrypted_spd, crypto).await?;
+    let mut account = restore_account(pool, apple_id, encrypted_spd, crypto, anisette_url).await?;
     let token = match cache_xcode_token_from_account(pool, &mut account).await {
         Ok(t) => t,
         Err(e) => return Err(e),
@@ -520,13 +524,14 @@ pub async fn install_ipa(
     device_udid: &str,
     encrypted_pairing: &[u8],
     ipa_path: &str,
+    anisette_url: &str,
     progress_cb: impl Fn(u64, &'static str) + Send + 'static,
 ) -> anyhow::Result<String> {
     let db_storage = DbStorage::load(pool.clone(), &account_storage_prefix(apple_id))
         .await
         .map_err(|e| anyhow::anyhow!("Storage load failed: {e}"))?;
 
-    let dev_session = get_dev_session(pool, apple_id, encrypted_spd, crypto).await?;
+    let dev_session = get_dev_session(pool, apple_id, encrypted_spd, crypto, anisette_url).await?;
 
     let mut sideloader = SideloaderBuilder::new(dev_session, apple_id.to_string())
         .team_selection(TeamSelection::First)
@@ -668,8 +673,9 @@ pub async fn refresh_provisioning_profile(
     mdns_ip: Option<&str>,
     encrypted_pairing: &[u8],
     bundle_id: &str,
+    anisette_url: &str,
 ) -> anyhow::Result<()> {
-    let mut dev_session = get_dev_session(pool, apple_id, encrypted_spd, crypto).await?;
+    let mut dev_session = get_dev_session(pool, apple_id, encrypted_spd, crypto, anisette_url).await?;
 
     let teams = dev_session
         .list_teams()
