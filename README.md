@@ -89,10 +89,10 @@ Output: a single binary at `target/release/jas` and a `target/site/` directory o
 static assets. Both must be present at runtime (`LEPTOS_SITE_ROOT` points the
 binary to the assets, configurable in `Cargo.toml` under `[package.metadata.leptos]`).
 
-To run on Linux:
+To run on Linux (Place /target/site next to the jas binary):
 
 ```bash
-JAS_SECRET_KEY=<32-byte-hex> ./target/release/jas
+JAS_SECRET_KEY=<32-byte-hex> ./jas
 ```
 
 The `JAS_SECRET_KEY` flag is optional but protects your data locally. You can build the project yourself or download a prebuilt binary from [GitHub Actions](https://github.com/jkcoxson/jas/actions).
