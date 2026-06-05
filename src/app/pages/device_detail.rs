@@ -643,7 +643,6 @@ fn InstallForm(device_id: Signal<String>, #[prop(into)] on_install: Callback<()>
     Effect::new(move |_| {
         if let Some(Ok(ref id)) = install_action.value().get() {
             active_job.set(Some(id.clone()));
-            on_install.run(());
         }
     });
 
