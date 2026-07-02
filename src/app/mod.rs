@@ -776,16 +776,21 @@ pub async fn install_ipa(
         return Err(ServerFnError::new("account_id is empty, select an account"));
     }
 
-    // Verify FK references exist before touching the DB, so errors are readable.
-    let device_exists = sqlx::query_scalar!("SELECT COUNT(*) FROM devices WHERE id = ?", device_id)
-        .fetch_one(&state.db)
+    // Verify the device exists and is reachable before doing any work. A quick
+    // TCP probe here means a disconnected device fails fast with a clear error
+    // instead of ~10s into a sign+install.
+    let device = db::get_device(&state.db, &device_id)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-    if device_exists == 0 {
-        return Err(ServerFnError::new(format!(
-            "Device '{device_id}' not found in DB"
-        )));
-    }
+        .map_err(|e| ServerFnError::new(e.to_string()))?
+        .ok_or_else(|| ServerFnError::new(format!("Device '{device_id}' not found in DB")))?;
+
+    sideload::tcp_ping(&device.ip, device.mdns_ip.as_deref())
+        .await
+        .map_err(|e| {
+            ServerFnError::new(format!(
+                "Device is not reachable ({e}). Make sure it is powered on and on the same network, then try again."
+            ))
+        })?;
 
     let account_exists = sqlx::query_scalar!(
         "SELECT COUNT(*) FROM apple_accounts WHERE id = ?",
@@ -1104,23 +1109,6 @@ pub async fn change_device_ip(device_id: String, ip: String) -> Result<(), Serve
         return Err(ServerFnError::new("IP must not be empty"));
     }
     db::update_device_ip(&state.db, &device_id, &ip)
-        .await
-        .map_err(|e| ServerFnError::new(e.to_string()))
-}
-
-/// TCP-ping the device on port 49152. Returns latency in ms.
-#[server]
-pub async fn ping_device(device_id: String) -> Result<u64, ServerFnError> {
-    use crate::server::{db, sideload, state::AppState};
-    use leptos::prelude::use_context;
-
-    let state = use_context::<AppState>().ok_or_else(|| ServerFnError::new("No state"))?;
-    let device = db::get_device(&state.db, &device_id)
-        .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?
-        .ok_or_else(|| ServerFnError::new("Device not found"))?;
-
-    sideload::tcp_ping(&device.ip, device.mdns_ip.as_deref())
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))
 }

@@ -255,6 +255,11 @@ body {
   letter-spacing: 0.05em;
 }
 
+// Live connection status
+.badge-online  { background: #166534; color: #dcfce7; }
+.badge-stale   { background: #78350f; color: #fde68a; }
+.badge-offline { background: #374151; color: #d1d5db; }
+
 // Device grid
 .device-grid {
   display: grid;

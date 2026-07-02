@@ -3,7 +3,7 @@ use leptos_router::hooks::use_params_map;
 
 use crate::app::components::confirm;
 use crate::app::{
-    ChangeDeviceIp, DeleteApp, ExportPairing, InstallIpa, PingDevice, ReconcileApps, RefreshApp,
+    ChangeDeviceIp, DeleteApp, ExportPairing, InstallIpa, ReconcileApps, RefreshApp,
     ReimportPairing, SetRefreshEnabled, get_device_info, job_status, list_accounts, list_apps,
 };
 
@@ -35,6 +35,77 @@ fn expires_in_label(installed_at: Option<i64>, last_refreshed: Option<i64>) -> S
     }
 }
 
+/// Live reachability label derived from the last mDNS resolution timestamp
+/// (`mdns_seen_at`), which the background mDNS browser refreshes whenever it
+/// sees the device on the LAN. Returns (label, css_class).
+fn connection_status(mdns_seen_at: Option<i64>) -> (String, &'static str) {
+    let Some(seen) = mdns_seen_at else {
+        return ("Not discovered".to_string(), "badge-offline");
+    };
+
+    #[cfg(target_arch = "wasm32")]
+    let now_secs = (js_sys::Date::now() / 1000.0) as i64;
+    #[cfg(not(target_arch = "wasm32"))]
+    let now_secs = chrono::Local::now().timestamp();
+
+    let age = now_secs - seen;
+    if age <= 120 {
+        ("Online".to_string(), "badge-online")
+    } else if age < 3600 {
+        (format!("Seen {}m ago", (age / 60).max(1)), "badge-stale")
+    } else if age < 86400 {
+        (format!("Seen {}h ago", age / 3600), "badge-offline")
+    } else {
+        (format!("Seen {}d ago", age / 86400), "badge-offline")
+    }
+}
+
+#[component]
+fn ConnectionBadge(device_id: Signal<String>) -> impl IntoView {
+    let trigger = RwSignal::new(0u32);
+    let info = Resource::new(
+        move || (device_id.get(), trigger.get()),
+        |(id, _)| get_device_info(id),
+    );
+
+    // Re-poll every 10s on the client so the badge stays live.
+    Effect::new(move |_| {
+        trigger.track();
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen::closure::Closure;
+            use wasm_bindgen::JsCast;
+            let cb: Closure<dyn FnMut()> = Closure::once(move || {
+                trigger.update(|n| *n += 1);
+            });
+            let _ = web_sys::window()
+                .expect("window")
+                .set_timeout_with_callback_and_timeout_and_arguments_0(
+                    cb.as_ref().unchecked_ref(),
+                    10_000,
+                );
+            cb.forget();
+        }
+    });
+
+    view! {
+        <Transition fallback=|| view! { <span class="badge badge-offline">"…"</span> }>
+            {move || {
+                info.get()
+                    .map(|r| match r {
+                        Ok(dev) => {
+                            let (label, cls) = connection_status(dev.mdns_seen_at);
+                            view! { <span class=format!("badge {cls}")>{label}</span> }.into_any()
+                        }
+                        Err(_) => {
+                            view! { <span class="badge badge-offline">"Unknown"</span> }.into_any()
+                        }
+                    })
+            }}
+        </Transition>
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn trigger_pairing_download(bytes_b64: &str) {
     use wasm_bindgen::JsCast;
@@ -63,7 +134,6 @@ fn DeviceManagementCard(
     on_device_changed: Callback<()>,
     on_installed: Callback<()>,
 ) -> impl IntoView {
-    let ping_action = ServerAction::<PingDevice>::new();
     let export_action = ServerAction::<ExportPairing>::new();
     let reimport_action = ServerAction::<ReimportPairing>::new();
     let change_ip_action = ServerAction::<ChangeDeviceIp>::new();
@@ -103,32 +173,6 @@ fn DeviceManagementCard(
                 >
                     "Install IPA"
                 </button>
-            </div>
-
-            // Ping
-            <div class="device-mgmt-row">
-                <ActionForm action=ping_action>
-                    <input type="hidden" name="device_id" value=move || did.get() />
-                    <button type="submit" class="btn btn-secondary">
-                        "Ping Device"
-                    </button>
-                </ActionForm>
-                {move || {
-                    ping_action
-                        .value()
-                        .get()
-                        .map(|r| match r {
-                            Ok(ms) => {
-                                view! {
-                                    <span class="success">"Reachable (" {ms} "ms)"</span>
-                                }
-                                    .into_any()
-                            }
-                            Err(e) => {
-                                view! { <span class="error">{e.to_string()}</span> }.into_any()
-                            }
-                        })
-                }}
             </div>
 
             // Export pairing
@@ -341,6 +385,9 @@ pub fn DeviceDetail() -> impl IntoView {
                                                 <span class="badge badge-static">
                                                     {dev.ip.clone()}
                                                 </span>
+                                                <ConnectionBadge device_id=Signal::derive(
+                                                    device_id,
+                                                ) />
                                             </div>
                                             <div class="card">
                                                 <table class="info-table">
