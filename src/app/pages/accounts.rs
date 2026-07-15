@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use crate::app::components::confirm;
+use crate::app::components::{confirm, round_up_duration};
 use crate::app::{
     begin_login, complete_login, export_livecontainer_cert, list_account_app_ids, list_accounts,
     AppIdsResult, DeleteAccount, LcCertExport, RevokeAllCerts,
@@ -243,7 +243,7 @@ pub fn Accounts() -> impl IntoView {
                                                 <tr>
                                                     <th>"Name"</th>
                                                     <th>"Identifier"</th>
-                                                    <th>"Expires"</th>
+                                                    <th>"Expires In"</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -251,15 +251,31 @@ pub fn Accounts() -> impl IntoView {
                                                     .entries
                                                     .into_iter()
                                                     .map(|e| {
+                                                        #[cfg(target_arch = "wasm32")]
+                                                        let now_secs = (js_sys::Date::now() / 1000.0)
+                                                            as i64;
+                                                        #[cfg(not(target_arch = "wasm32"))]
+                                                        let now_secs = chrono::Local::now().timestamp();
+
+                                                        let expiry_label = e
+                                                            .expiration_date
+                                                            .map(|ts| round_up_duration(ts - now_secs))
+                                                            .unwrap_or_else(|| "-".to_string());
+                                                        let expiry_class = if expiry_label
+                                                            == "Expired"
+                                                        {
+                                                            "error"
+                                                        } else {
+                                                            ""
+                                                        };
                                                         view! {
                                                             <tr>
                                                                 <td>{e.name}</td>
                                                                 <td class="mono">
                                                                     {e.identifier}
                                                                 </td>
-                                                                <td>
-                                                                    {e.expiration_date
-                                                                        .unwrap_or_else(|| "-".to_string())}
+                                                                <td class=expiry_class>
+                                                                    {expiry_label}
                                                                 </td>
                                                             </tr>
                                                         }

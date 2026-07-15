@@ -1,10 +1,11 @@
 use leptos::prelude::*;
 use leptos_router::hooks::use_params_map;
 
-use crate::app::components::confirm;
+use crate::app::components::{confirm, round_up_duration};
 use crate::app::{
-    ChangeDeviceIp, DeleteApp, ExportPairing, InstallIpa, ReconcileApps, RefreshApp,
+    ChangeDeviceIp, DeleteApp, ExportPairing, InstallIpa, ReconcileApps, RefreshApp, RefreshDevice,
     ReimportPairing, SetRefreshEnabled, get_device_info, job_status, list_accounts, list_apps,
+    probe_device,
 };
 
 /// Compute "expires in" label from installed_at / last_refreshed Unix timestamps.
@@ -24,23 +25,19 @@ fn expires_in_label(installed_at: Option<i64>, last_refreshed: Option<i64>) -> S
     let expires_at = last_event + CERT_LIFETIME_SECS;
     let remaining = expires_at - now_secs;
 
-    if remaining <= 0 {
-        "Expired".to_string()
-    } else if remaining >= 86400 {
-        format!("{}d", remaining / 86400)
-    } else if remaining >= 3600 {
-        format!("{}h", remaining / 3600)
-    } else {
-        format!("{}m", (remaining / 60).max(1))
-    }
+    round_up_duration(remaining)
 }
 
-/// Live reachability label derived from the last mDNS resolution timestamp
-/// (`mdns_seen_at`), which the background mDNS browser refreshes whenever it
-/// sees the device on the LAN. Returns (label, css_class).
-fn connection_status(mdns_seen_at: Option<i64>) -> (String, &'static str) {
+/// Live reachability label. `reachable_ms` comes from an active TCP probe run
+/// just now; if that failed we fall back to the last mDNS sighting age as a
+/// hint (mDNS never fires for VPN-only devices, so this is best-effort).
+fn connection_status(reachable_ms: Option<u64>, mdns_seen_at: Option<i64>) -> (String, &'static str) {
+    if let Some(ms) = reachable_ms {
+        return (format!("Online ({ms}ms)"), "badge-online");
+    }
+
     let Some(seen) = mdns_seen_at else {
-        return ("Not discovered".to_string(), "badge-offline");
+        return ("Not reachable".to_string(), "badge-offline");
     };
 
     #[cfg(target_arch = "wasm32")]
@@ -49,9 +46,7 @@ fn connection_status(mdns_seen_at: Option<i64>) -> (String, &'static str) {
     let now_secs = chrono::Local::now().timestamp();
 
     let age = now_secs - seen;
-    if age <= 120 {
-        ("Online".to_string(), "badge-online")
-    } else if age < 3600 {
+    if age < 3600 {
         (format!("Seen {}m ago", (age / 60).max(1)), "badge-stale")
     } else if age < 86400 {
         (format!("Seen {}h ago", age / 3600), "badge-offline")
@@ -63,12 +58,12 @@ fn connection_status(mdns_seen_at: Option<i64>) -> (String, &'static str) {
 #[component]
 fn ConnectionBadge(device_id: Signal<String>) -> impl IntoView {
     let trigger = RwSignal::new(0u32);
-    let info = Resource::new(
+    let probe = Resource::new(
         move || (device_id.get(), trigger.get()),
-        |(id, _)| get_device_info(id),
+        |(id, _)| probe_device(id),
     );
 
-    // Re-poll every 10s on the client so the badge stays live.
+    // Re-probe every 10s on the client so the badge stays live.
     Effect::new(move |_| {
         trigger.track();
         #[cfg(target_arch = "wasm32")]
@@ -89,12 +84,13 @@ fn ConnectionBadge(device_id: Signal<String>) -> impl IntoView {
     });
 
     view! {
-        <Transition fallback=|| view! { <span class="badge badge-offline">"…"</span> }>
+        <Transition fallback=|| view! { <span class="badge badge-offline">"Pinging…"</span> }>
             {move || {
-                info.get()
+                probe
+                    .get()
                     .map(|r| match r {
-                        Ok(dev) => {
-                            let (label, cls) = connection_status(dev.mdns_seen_at);
+                        Ok(p) => {
+                            let (label, cls) = connection_status(p.reachable_ms, p.mdns_seen_at);
                             view! { <span class=format!("badge {cls}")>{label}</span> }.into_any()
                         }
                         Err(_) => {
@@ -350,12 +346,14 @@ pub fn DeviceDetail() -> impl IntoView {
     let toggle_action = ServerAction::<SetRefreshEnabled>::new();
     let delete_app_action = ServerAction::<DeleteApp>::new();
     let reconcile_action = ServerAction::<ReconcileApps>::new();
+    let refresh_all_action = ServerAction::<RefreshDevice>::new();
 
     Effect::new(move |_| {
         if refresh_action.version().get() > 0
             || toggle_action.version().get() > 0
             || delete_app_action.version().get() > 0
             || reconcile_action.version().get() > 0
+            || refresh_all_action.version().get() > 0
         {
             apps.refetch();
         }
@@ -443,6 +441,22 @@ pub fn DeviceDetail() -> impl IntoView {
                             "Sync from device"
                         </button>
                     </ActionForm>
+                    <ActionForm action=refresh_all_action>
+                        <input type="hidden" name="device_id" value=device_id />
+                        <button
+                            type="submit"
+                            class="btn btn-sm btn-primary"
+                            prop:disabled=move || refresh_all_action.pending().get()
+                        >
+                            {move || {
+                                if refresh_all_action.pending().get() {
+                                    "Queuing..."
+                                } else {
+                                    "Refresh All"
+                                }
+                            }}
+                        </button>
+                    </ActionForm>
                 </div>
                 {move || {
                     reconcile_action
@@ -468,6 +482,34 @@ pub fn DeviceDetail() -> impl IntoView {
                                 view! {
                                     <div class="alert alert-error">
                                         "Sync error: " {e.to_string()}
+                                    </div>
+                                }
+                                    .into_any()
+                            }
+                        })
+                }}
+                {move || {
+                    refresh_all_action
+                        .value()
+                        .get()
+                        .map(|r| match r {
+                            Ok(0) => {
+                                view! { <div class="alert alert-success">"Nothing to refresh."</div> }
+                                    .into_any()
+                            }
+                            Ok(n) => {
+                                view! {
+                                    <div class="alert alert-success">
+                                        {n} " refresh job" {if n == 1 { "" } else { "s" }}
+                                        " queued."
+                                    </div>
+                                }
+                                    .into_any()
+                            }
+                            Err(e) => {
+                                view! {
+                                    <div class="alert alert-error">
+                                        "Refresh error: " {e.to_string()}
                                     </div>
                                 }
                                     .into_any()

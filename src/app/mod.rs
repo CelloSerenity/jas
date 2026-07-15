@@ -46,6 +46,9 @@ pub fn App() -> impl IntoView {
                 <A href="/accounts" attr:class="nav-link">
                     "Accounts"
                 </A>
+                <A href="/queue" attr:class="nav-link">
+                    "Queue"
+                </A>
                 <A href="/settings" attr:class="nav-link">
                     "Settings"
                 </A>
@@ -56,6 +59,7 @@ pub fn App() -> impl IntoView {
                     <Route path=StaticSegment("devices") view=pages::devices::Devices />
                     <Route path=path!("/devices/:id") view=pages::device_detail::DeviceDetail />
                     <Route path=StaticSegment("accounts") view=pages::accounts::Accounts />
+                    <Route path=StaticSegment("queue") view=pages::queue::Queue />
                     <Route path=StaticSegment("settings") view=pages::settings::Settings />
                 </Routes>
             </main>
@@ -107,7 +111,8 @@ pub struct LcCertExport {
 pub struct AppIdEntry {
     pub name: String,
     pub identifier: String,
-    pub expiration_date: Option<String>,
+    /// Unix timestamp (seconds) the App ID's certificate expires at.
+    pub expiration_date: Option<i64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -134,6 +139,22 @@ pub struct AppInfo {
 pub struct JobInfo {
     pub id: String,
     pub app_id: String,
+    pub kind: String,
+    pub status: String,
+    pub error: Option<String>,
+    pub started_at: Option<i64>,
+    pub finished_at: Option<i64>,
+    pub progress: i64,
+    pub stage: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct QueueEntry {
+    pub id: String,
+    pub app_id: String,
+    pub app_name: String,
+    pub device_id: String,
+    pub device_name: String,
     pub kind: String,
     pub status: String,
     pub error: Option<String>,
@@ -658,7 +679,7 @@ pub async fn list_account_app_ids(account_id: String) -> Result<AppIdsResult, Se
             let expiration_date = a.expiration_date.map(|d| {
                 let st: std::time::SystemTime = d.into();
                 let dt: chrono::DateTime<chrono::Utc> = st.into();
-                dt.format("%Y-%m-%d").to_string()
+                dt.timestamp()
             });
             AppIdEntry {
                 name: a.name,
@@ -973,6 +994,35 @@ pub async fn refresh_device(device_id: String) -> Result<usize, ServerFnError> {
 }
 
 #[server]
+pub async fn list_jobs() -> Result<Vec<QueueEntry>, ServerFnError> {
+    use crate::server::{db, state::AppState};
+    use leptos::prelude::use_context;
+
+    let state = use_context::<AppState>().ok_or_else(|| ServerFnError::new("No state"))?;
+    let rows = db::list_jobs(&state.db, 20)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| QueueEntry {
+            id: r.id,
+            app_id: r.app_id,
+            app_name: r.app_name,
+            device_id: r.device_id,
+            device_name: r.device_name,
+            kind: r.kind,
+            status: r.status,
+            error: r.error,
+            started_at: r.started_at,
+            finished_at: r.finished_at,
+            progress: r.progress,
+            stage: r.stage,
+        })
+        .collect())
+}
+
+#[server]
 pub async fn job_status(job_id: String) -> Result<JobInfo, ServerFnError> {
     use crate::server::{db, state::AppState};
     use leptos::prelude::use_context;
@@ -1210,6 +1260,38 @@ pub async fn get_device_info(id: String) -> Result<DeviceInfo, ServerFnError> {
         discovery: row.discovery,
         mdns_ip: row.mdns_ip,
         mdns_seen_at: row.mdns_seen_at,
+    })
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DeviceProbe {
+    /// Round-trip time in ms if a live TCP probe to the device succeeded just now.
+    pub reachable_ms: Option<u64>,
+    pub mdns_seen_at: Option<i64>,
+}
+
+/// Actively TCP-probes the device (preferring its mDNS LAN IP, falling back
+/// to the manual IP) so the UI can show real-time reachability instead of
+/// relying solely on the last mDNS sighting, which never fires for
+/// VPN-only devices.
+#[server]
+pub async fn probe_device(device_id: String) -> Result<DeviceProbe, ServerFnError> {
+    use crate::server::{db, sideload, state::AppState};
+    use leptos::prelude::use_context;
+
+    let state = use_context::<AppState>().ok_or_else(|| ServerFnError::new("No state"))?;
+    let device = db::get_device(&state.db, &device_id)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?
+        .ok_or_else(|| ServerFnError::new("Device not found"))?;
+
+    let reachable_ms = sideload::tcp_ping(&device.ip, device.mdns_ip.as_deref())
+        .await
+        .ok();
+
+    Ok(DeviceProbe {
+        reachable_ms,
+        mdns_seen_at: device.mdns_seen_at,
     })
 }
 
