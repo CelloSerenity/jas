@@ -2,6 +2,10 @@ use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
 use tracing::info;
 
+use aes_gcm::{
+    aead::{Aead, KeyInit},
+    Aes256Gcm, Nonce,
+};
 use idevice::{
     afc::opcode::AfcFopenMode,
     afc::AfcClient,
@@ -24,9 +28,14 @@ use isideload::{
         app_ids::AppIdsApi, developer_session::DeveloperSession, devices::DevicesApi,
         teams::TeamsApi,
     },
-    sideload::{builder::MaxCertsBehavior, SideloaderBuilder, TeamSelection},
+    sideload::{
+        builder::MaxCertsBehavior, cert_identity::CertificateIdentity, SideloaderBuilder,
+        TeamSelection,
+    },
     util::storage::SideloadingStorage,
 };
+use rand::RngCore;
+use sha2::{Digest, Sha256};
 use std::io::Write;
 
 use crate::server::{crypto::Crypto, db::storage::DbStorage};
@@ -445,6 +454,63 @@ fn create_ipa(app_path: &Path) -> anyhow::Result<Vec<u8>> {
     Ok(cursor.into_inner())
 }
 
+fn bundle_altstore_pairing(
+    ipa_path: &Path,
+    pairing: &[u8],
+    machine_id: &str,
+) -> anyhow::Result<PathBuf> {
+    let key = Sha256::digest(machine_id.as_bytes());
+    let cipher = Aes256Gcm::new_from_slice(&key)?;
+    let mut nonce = [0u8; 12];
+    rand::thread_rng().fill_bytes(&mut nonce);
+    let ciphertext = cipher
+        .encrypt(Nonce::from_slice(&nonce), pairing)
+        .map_err(|_| anyhow::anyhow!("Failed to encrypt AltStore pairing file"))?;
+    let mut sealed = nonce.to_vec();
+    sealed.extend_from_slice(&ciphertext);
+
+    let input = std::fs::File::open(ipa_path)?;
+    let mut archive = zip::ZipArchive::new(input)?;
+    let app_dir = (0..archive.len())
+        .find_map(|i| {
+            let name = archive.by_index(i).ok()?.name().to_string();
+            let rest = name.strip_prefix("Payload/")?;
+            let (dir, tail) = rest.split_once('/')?;
+            (dir.ends_with(".app") && tail == "Info.plist").then(|| dir.to_string())
+        })
+        .ok_or_else(|| anyhow::anyhow!("AltStore app bundle not found in IPA"))?;
+    let pairing_path = format!("Payload/{app_dir}/ALTPairingFile.dat");
+    let output_path = ipa_path.with_file_name(format!("jas-altstore-{}.ipa", uuid::Uuid::new_v4()));
+    let result = (|| -> anyhow::Result<()> {
+        let output = std::fs::File::create(&output_path)?;
+        let mut writer = zip::ZipWriter::new(output);
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i)?;
+            if entry.name() == pairing_path {
+                continue;
+            }
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(entry.compression())
+                .unix_permissions(entry.unix_mode().unwrap_or(0o644));
+            if entry.is_dir() {
+                writer.add_directory(entry.name(), options)?;
+            } else {
+                writer.start_file(entry.name(), options)?;
+                std::io::copy(&mut entry, &mut writer)?;
+            }
+        }
+        writer.start_file(&pairing_path, zip::write::SimpleFileOptions::default())?;
+        writer.write_all(&sealed)?;
+        writer.finish()?.flush()?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&output_path);
+        return Err(error);
+    }
+    Ok(output_path)
+}
+
 fn add_to_zip(
     zip: &mut zip::ZipWriter<std::io::Cursor<Vec<u8>>>,
     dir: &Path,
@@ -597,11 +663,50 @@ pub async fn install_ipa(
         .await
         .map_err(|e| anyhow::anyhow!("ensure_device_registered failed: {e}"))?;
 
-    info!("Signing {ipa_path}");
-    let (signed_path, _special) = sideloader
-        .sign_app(PathBuf::from(ipa_path), Some(team), true)
+    let altstore = {
+        let bytes = tokio::fs::read(ipa_path).await?;
+        read_ipa_info(&bytes)?.display_name == "AltStore"
+    };
+    let bundled_ipa = if altstore {
+        let storage = DbStorage::load(pool.clone(), &account_storage_prefix(apple_id)).await?;
+        let cert = CertificateIdentity::retrieve(
+            "jas",
+            apple_id,
+            sideloader.get_dev_session(),
+            &team,
+            &storage,
+            &MaxCertsBehavior::Revoke,
+        )
         .await
-        .map_err(|e| anyhow::anyhow!("sign_app failed: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to retrieve AltStore signing certificate: {e}"))?;
+        let pairing = pairing_bytes.clone();
+        let machine_id = cert.machine_id;
+        let source = PathBuf::from(ipa_path);
+        Some(
+            tokio::task::spawn_blocking(move || {
+                bundle_altstore_pairing(&source, &pairing, &machine_id)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("AltStore bundling task panicked: {e}"))??,
+        )
+    } else {
+        None
+    };
+
+    info!("Signing {ipa_path}");
+    let signed = sideloader
+        .sign_app(
+            bundled_ipa
+                .clone()
+                .unwrap_or_else(|| PathBuf::from(ipa_path)),
+            Some(team),
+            true,
+        )
+        .await;
+    if let Some(path) = bundled_ipa {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    let (signed_path, _special) = signed.map_err(|e| anyhow::anyhow!("sign_app failed: {e}"))?;
 
     let real_bundle_id = {
         let p = signed_path.clone();
