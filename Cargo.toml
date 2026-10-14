@@ -42,7 +42,7 @@ thiserror = { version = "2" }
 base64 = { version = "0.22" }
 
 # SSR-only
-isideload = { version = "0.4.4", optional = true, default-features = false, features = [
+isideload = { version = "0.4.6", optional = true, default-features = false, features = [
   "install",
   "tokio-mt",
 ] }
