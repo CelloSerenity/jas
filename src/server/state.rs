@@ -35,7 +35,10 @@ pub struct JobRequest {
 }
 
 pub enum JobKind {
-    Install { ipa_path: String },
+    Install {
+        ipa_path: String,
+        reuse_main_profile: bool,
+    },
     Refresh,
 }
 

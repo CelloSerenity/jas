@@ -248,7 +248,7 @@ async fn run_job(state: &AppState, req: &JobRequest) -> anyhow::Result<String> {
     }
 
     let ipa_path = match &req.kind {
-        JobKind::Install { ipa_path } => ipa_path.clone(),
+        JobKind::Install { ipa_path, .. } => ipa_path.clone(),
         JobKind::Refresh => {
             let app = db::get_app(&state.db, &req.app_id)
                 .await?
@@ -256,6 +256,13 @@ async fn run_job(state: &AppState, req: &JobRequest) -> anyhow::Result<String> {
             app.ipa_path
                 .ok_or_else(|| anyhow::anyhow!("App has no stored IPA"))?
         }
+    };
+
+    let reuse_main_profile = match &req.kind {
+        JobKind::Install {
+            reuse_main_profile, ..
+        } => *reuse_main_profile,
+        JobKind::Refresh => true,
     };
 
     let db = state.db.clone();
@@ -271,6 +278,7 @@ async fn run_job(state: &AppState, req: &JobRequest) -> anyhow::Result<String> {
         &device.udid,
         &device.pairing_blob,
         &ipa_path,
+        reuse_main_profile,
         &anisette_url,
         move |progress, stage| {
             let db = db.clone();

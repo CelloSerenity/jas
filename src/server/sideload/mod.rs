@@ -24,7 +24,10 @@ use isideload::{
         app_ids::AppIdsApi, developer_session::DeveloperSession, devices::DevicesApi,
         teams::TeamsApi,
     },
-    sideload::{builder::MaxCertsBehavior, SideloaderBuilder, TeamSelection},
+    sideload::{
+        builder::{ExtensionsBehavior, ExtensionsBehaviorSelection, MaxCertsBehavior},
+        SideloaderBuilder, TeamSelection,
+    },
     util::storage::SideloadingStorage,
 };
 use std::io::Write;
@@ -288,7 +291,7 @@ pub async fn restore_account(
         tokio::sync::RwLock::new(provider),
     ));
 
-    let mut account = AppleAccount::new(apple_id, anisette_generator, false)
+    let mut account = AppleAccount::new(apple_id, anisette_generator, false, None, None)
         .await
         .map_err(|e| anyhow::anyhow!("AppleAccount init failed: {e}"))?;
 
@@ -389,7 +392,7 @@ pub async fn get_dev_session(
                     .await
                     .map_err(|e| anyhow::anyhow!("Anisette get_client_info failed: {e}"))?;
                 let grandslam = std::sync::Arc::new(
-                    GrandSlam::new(client_info, false)
+                    GrandSlam::new(client_info, false, None)
                         .await
                         .map_err(|e| anyhow::anyhow!("GrandSlam init failed: {e}"))?,
                 );
@@ -492,6 +495,7 @@ pub fn read_ipa_info(ipa_bytes: &[u8]) -> anyhow::Result<IpaInfo> {
                 .by_index(i)
                 .map_err(|e| anyhow::anyhow!("zip entry {i}: {e}"))?
                 .name()
+                .map_err(|e| anyhow::anyhow!("zip entry {i} name: {e}"))?
                 .to_string();
             if let Some(rest) = name.strip_prefix("Payload/") {
                 if let Some((app_dir, tail)) = rest.split_once('/') {
@@ -564,6 +568,7 @@ pub async fn install_ipa(
     device_udid: &str,
     encrypted_pairing: &[u8],
     ipa_path: &str,
+    reuse_main_profile: bool,
     anisette_url: &str,
     progress_cb: impl Fn(u64, &'static str) + Send + 'static,
 ) -> anyhow::Result<String> {
@@ -573,9 +578,20 @@ pub async fn install_ipa(
 
     let dev_session = get_dev_session(pool, apple_id, encrypted_spd, crypto, anisette_url).await?;
 
-    let mut sideloader = SideloaderBuilder::new(dev_session, apple_id.to_string())
+    let mut sideloader = SideloaderBuilder::<
+        isideload::util::callbacks::MaxCertsCallbackBox,
+        isideload::util::callbacks::ExtensionsBehaviorCallbackBox,
+    >::new(
+        dev_session,
+        apple_id.to_string(),
+    )
         .team_selection(TeamSelection::First)
         .max_certs_behavior(MaxCertsBehavior::Revoke)
+        .extensions_behavior(ExtensionsBehaviorSelection::Fixed(if reuse_main_profile {
+            ExtensionsBehavior::ReuseMain
+        } else {
+            ExtensionsBehavior::RegisterAll
+        }))
         .storage(Box::new(db_storage))
         .machine_name("jas".to_string())
         .build();
@@ -599,7 +615,14 @@ pub async fn install_ipa(
 
     info!("Signing {ipa_path}");
     let (signed_path, _special) = sideloader
-        .sign_app(PathBuf::from(ipa_path), Some(team), true)
+        .sign_app(
+            PathBuf::from(ipa_path),
+            Some(team),
+            true,
+            None::<fn(f32) -> std::future::Ready<()>>,
+            Some(&pairing_bytes),
+            Some(device_udid),
+        )
         .await
         .map_err(|e| anyhow::anyhow!("sign_app failed: {e}"))?;
 

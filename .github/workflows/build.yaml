@@ -12,9 +12,8 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-          - os: ubuntu-24.04-arm
-          - os: macos-26
-          - os: macos-26-intel
+          - os: ubuntu-26.04-arm
+          - os: xcode-27
           - os: windows-latest
 
     runs-on: ${{ matrix.os }}
@@ -27,12 +26,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-
-      - name: Install OpenSSL on ubuntu-24.04-arm
-        if: matrix.os == 'ubuntu-24.04-arm'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev
 
       - name: Cache cargo registry and git dependencies
         uses: actions/cache@v5
@@ -69,3 +62,47 @@ jobs:
         with:
           name: jas-${{ runner.os }}-${{ runner.arch }}
           path: dist
+
+  nightly:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: nightly-release
+      cancel-in-progress: false
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: jas-*
+          path: artifacts
+
+      - name: Package ZIPs
+        run: |
+          mkdir dist
+          for artifact in artifacts/jas-*; do
+            name="${artifact##*/}"
+            if [ -f "$artifact/jas" ]; then
+              chmod +x "$artifact/jas"
+            fi
+            (cd "$artifact" && zip -qr "$GITHUB_WORKSPACE/dist/$name.zip" .)
+          done
+
+      - name: Publish nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view nightly --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload nightly dist/*.zip --clobber --repo "$GITHUB_REPOSITORY"
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" \
+              -f sha="$GITHUB_SHA" -F force=true
+            gh release edit nightly --notes "Built from $GITHUB_SHA" --prerelease --latest=false \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create nightly dist/*.zip --target "$GITHUB_SHA" \
+              --title Nightly --notes "Built from $GITHUB_SHA" --prerelease --latest=false \
+              --repo "$GITHUB_REPOSITORY"
+          fi

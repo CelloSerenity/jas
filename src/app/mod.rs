@@ -458,7 +458,7 @@ pub async fn begin_login(
                 tokio::sync::RwLock::new(provider),
             ));
 
-            let mut account = AppleAccount::new(&apple_id_clone, anisette_generator, false)
+            let mut account = AppleAccount::new(&apple_id_clone, anisette_generator, false, None, None)
                 .await
                 .map_err(|e| format!("Account init: {e}"))?;
 
@@ -480,7 +480,7 @@ pub async fn begin_login(
                             rx.recv_timeout(std::time::Duration::from_secs(300)).ok()
                         });
 
-                        match action {
+                        std::future::ready(Ok(match action {
                             Some(TwoFactorAction::SubmitCode(code)) => {
                                 TwoFactorCallbackResponse::SubmitCode(code)
                             }
@@ -497,7 +497,7 @@ pub async fn begin_login(
                             Some(TwoFactorAction::Abort) | None => {
                                 TwoFactorCallbackResponse::Abort
                             }
-                        }
+                        }))
                     }),
                 )
                 .await
@@ -758,7 +758,7 @@ pub async fn export_livecontainer_cert(
         &mut dev_session,
         &team,
         &db_storage,
-        &MaxCertsBehavior::Revoke,
+        &MaxCertsBehavior::<isideload::util::callbacks::MaxCertsCallbackBox>::Revoke,
     )
     .await
     .map_err(|e| ServerFnError::new(format!("Failed to retrieve certificate: {e}")))?;
@@ -933,6 +933,7 @@ pub async fn install_ipa(
     account_id: String,
     ipa_bytes_b64: String,
     store: bool,
+    reuse_main_profile: bool,
 ) -> Result<String, ServerFnError> {
     use crate::server::{
         db, sideload,
@@ -1045,6 +1046,7 @@ pub async fn install_ipa(
         account_id,
         kind: JobKind::Install {
             ipa_path: ipa_for_job,
+            reuse_main_profile,
         },
     };
 

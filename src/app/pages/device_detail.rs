@@ -727,6 +727,7 @@ fn InstallForm(device_id: Signal<String>, #[prop(into)] on_install: Callback<()>
     let file_status = RwSignal::new(String::new());
     let account_id = RwSignal::new(String::new());
     let store = RwSignal::new(true);
+    let reuse_main_profile = RwSignal::new(true);
     let active_job = RwSignal::<Option<String>>::new(None);
 
     Effect::new(move |_| {
@@ -800,6 +801,14 @@ fn InstallForm(device_id: Signal<String>, #[prop(into)] on_install: Callback<()>
                     />
                     " Store IPA for auto-refresh"
                 </label>
+                <label class="form-field checkbox">
+                    <input
+                        type="checkbox"
+                        prop:checked=reuse_main_profile
+                        on:change=move |e| reuse_main_profile.set(event_target_checked(&e))
+                    />
+                    " Reuse main profile for app extensions"
+                </label>
             </div>
             <button
                 class="btn btn-primary"
@@ -814,6 +823,7 @@ fn InstallForm(device_id: Signal<String>, #[prop(into)] on_install: Callback<()>
                             account_id: account_id.get_untracked(),
                             ipa_bytes_b64: ipa_b64.get_untracked(),
                             store: store.get_untracked(),
+                            reuse_main_profile: reuse_main_profile.get_untracked(),
                         });
                 }
             >
