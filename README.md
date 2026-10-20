@@ -186,9 +186,11 @@ The IP a user provides is the permanent source of truth.
 The mDNS task (`_remotepairing._tcp.local.`) is a **LAN hint**.
 It browses the local network and, for each resolved peer, verifies the peer
 against each registered device's `alt_irk` from the pairing file.
-On a match it stamps `mdns_ip` / `mdns_seen_at` on that device.
+On a match it saves the advertised `port` alongside `mdns_ip` and `mdns_seen_at`.
 At connect time the transport tries `mdns_ip` first for a fast LAN path, then
-falls back to the manual IP.
+falls back to the manual IP, using that device's advertised port for both paths.
+Reachability probes use the same port. Registration performs a bounded mDNS
+lookup for the device's port, falling back to `49152` when unavailable.
 
 Every transport opens an **RSD (Remote Service Discovery)** tunnel over TCP to
 the device's IP using the trusted RPPairing file the user uploads at

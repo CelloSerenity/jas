@@ -77,6 +77,7 @@ async fn check_and_enqueue(state: &AppState) {
         let installed = match crate::server::sideload::list_installed_bundle_ids(
             &device.ip,
             device.mdns_ip.as_deref(),
+            device.port,
             &pairing_bytes,
         )
         .await
@@ -231,6 +232,7 @@ async fn run_job(state: &AppState, req: &JobRequest) -> anyhow::Result<String> {
             &account_row.session_blob,
             &device.ip,
             device.mdns_ip.as_deref(),
+            device.port,
             &device.pairing_blob,
             &app.bundle_id,
             &anisette_url,
@@ -274,6 +276,7 @@ async fn run_job(state: &AppState, req: &JobRequest) -> anyhow::Result<String> {
         &account_row.session_blob,
         &device.ip,
         device.mdns_ip.as_deref(),
+        device.port,
         &device.name,
         &device.udid,
         &device.pairing_blob,

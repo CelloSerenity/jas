@@ -344,7 +344,12 @@ pub async fn register_device(
         .map_err(|e| ServerFnError::new(format!("Invalid base64: {e}")))?;
 
     // Connect to the device, verify the pairing file, and auto-fetch its identity.
-    let (udid, name) = sideload::fetch_device_identity(&ip, &pairing_bytes)
+    let port = i64::from(
+        crate::server::mdns::discover_port(&ip, &pairing_bytes, &state.config.discovery)
+            .await
+            .unwrap_or(49152),
+    );
+    let (udid, name) = sideload::fetch_device_identity(&ip, port, &pairing_bytes)
         .await
         .map_err(|e| ServerFnError::new(format!("Device connection failed: {e}")))?;
 
@@ -352,7 +357,7 @@ pub async fn register_device(
 
     let id = uuid::Uuid::new_v4().to_string();
     db::insert_device(
-        &state.db, &id, &name, &udid, &ip, 49152, &encrypted, "static",
+        &state.db, &id, &name, &udid, &ip, port, &encrypted, "static",
     )
     .await
     .map_err(|e| ServerFnError::new(e.to_string()))?;
@@ -898,7 +903,7 @@ pub async fn reconcile_apps(device_id: String) -> Result<usize, ServerFnError> {
         .map_err(|_| ServerFnError::new("Failed to decrypt pairing"))?;
 
     let installed =
-        sideload::list_installed_bundle_ids(&device.ip, device.mdns_ip.as_deref(), &pairing_bytes)
+        sideload::list_installed_bundle_ids(&device.ip, device.mdns_ip.as_deref(), device.port, &pairing_bytes)
             .await
             .map_err(|e| ServerFnError::new(format!("Device unreachable: {e}")))?;
 
@@ -961,7 +966,7 @@ pub async fn install_ipa(
         .map_err(|e| ServerFnError::new(e.to_string()))?
         .ok_or_else(|| ServerFnError::new(format!("Device '{device_id}' not found in DB")))?;
 
-    sideload::tcp_ping(&device.ip, device.mdns_ip.as_deref())
+    sideload::tcp_ping(&device.ip, device.mdns_ip.as_deref(), device.port)
         .await
         .map_err(|e| {
             ServerFnError::new(format!(
@@ -1242,6 +1247,7 @@ pub async fn delete_app(app_id: String) -> Result<(), ServerFnError> {
         sideload::uninstall_app(
             &device.ip,
             device.mdns_ip.as_deref(),
+            device.port,
             &pairing_bytes,
             &app.bundle_id,
         )
@@ -1442,7 +1448,7 @@ pub async fn probe_device(device_id: String) -> Result<DeviceProbe, ServerFnErro
         .map_err(|e| ServerFnError::new(e.to_string()))?
         .ok_or_else(|| ServerFnError::new("Device not found"))?;
 
-    let reachable_ms = sideload::tcp_ping(&device.ip, device.mdns_ip.as_deref())
+    let reachable_ms = sideload::tcp_ping(&device.ip, device.mdns_ip.as_deref(), device.port)
         .await
         .ok();
 

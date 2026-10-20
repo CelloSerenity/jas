@@ -1,7 +1,7 @@
 //! mDNS discovery for `_remotepairing._tcp.local.`
 //!
 //! This task keeps a `ServiceDaemon` browsing in the background and writes
-//! the LAN-resolved IP back to `devices.mdns_ip` whenever a match is found.
+//! the advertised IP and port back to the device whenever a match is found.
 
 use std::net::IpAddr;
 
@@ -112,18 +112,20 @@ async fn handle_resolved(state: &AppState, info: &mdns_sd::ResolvedService) {
         }
 
         let ip_str = ip.to_string();
-        if device.mdns_ip.as_deref() == Some(ip_str.as_str()) {
+        let port = i64::from(info.get_port());
+        if port == 0 { return; }
+        if device.mdns_ip.as_deref() == Some(ip_str.as_str()) && device.port == port {
             // Same IP as last time; still bump mdns_seen_at so the UI shows
             // recent presence.
-            if let Err(e) = db::update_device_mdns_ip(&state.db, &device.id, &ip_str).await {
+            if let Err(e) = db::update_device_mdns_ip(&state.db, &device.id, &ip_str, port).await {
                 warn!("mDNS: update for {} failed: {e}", device.id);
             }
         } else {
             info!(
-                "mDNS: matched {} ({}) at {}",
-                device.name, device.udid, ip_str
+                "mDNS: matched {} at {}:{}",
+                device.name, ip_str, port
             );
-            if let Err(e) = db::update_device_mdns_ip(&state.db, &device.id, &ip_str).await {
+            if let Err(e) = db::update_device_mdns_ip(&state.db, &device.id, &ip_str, port).await {
                 warn!("mDNS: update for {} failed: {e}", device.id);
             }
         }
@@ -144,4 +146,61 @@ fn pick_ip(info: &mdns_sd::ResolvedService) -> Option<IpAddr> {
                 .find(|a| matches!(a, IpAddr::V6(v6) if !v6.is_unicast_link_local()))
         })
         .or_else(|| addrs.clone().next())
+}
+
+pub async fn discover_port(
+    device_ip: &str,
+    pairing_bytes: &[u8],
+    config: &crate::server::config::DiscoveryConfig,
+) -> Option<u16> {
+    if !config.mdns_enabled {
+        return None;
+    }
+    let pairing = RpPairingFile::from_bytes(pairing_bytes).ok()?;
+    let daemon = ServiceDaemon::new().ok()?;
+    let iface = config.mdns_interface.trim();
+    if !iface.is_empty() {
+        if let Err(e) = daemon.enable_interface(iface) {
+            warn!("mDNS: enable_interface({iface}) failed: {e}");
+        }
+    }
+    let result = async {
+        let receiver = daemon.browse(SERVICE_TYPE).ok()?;
+        while let Ok(event) = receiver.recv_async().await {
+            let ServiceEvent::ServiceResolved(info) = event else {
+                continue;
+            };
+            if info.get_port() == 0 {
+                continue;
+            }
+            let matches = if let Some(alt_irk) = pairing.alt_irk() {
+                match (
+                    info.get_property_val_str("identifier"),
+                    info.get_property_val_str("authTag"),
+                ) {
+                    (Some(identifier), Some(auth_tag)) => {
+                        PeerDevice::validate_auth_tag(alt_irk, identifier, auth_tag)
+                    }
+                    _ => false,
+                }
+            } else {
+                device_ip.parse::<IpAddr>().is_ok_and(|ip| {
+                    info.get_addresses()
+                        .iter()
+                        .any(|addr| addr.to_ip_addr() == ip)
+                })
+            };
+            if matches {
+                return Some(info.get_port());
+            }
+        }
+        None
+    };
+    let port = tokio::time::timeout(std::time::Duration::from_secs(3), result)
+        .await
+        .ok()
+        .flatten();
+    let _ = daemon.stop_browse(SERVICE_TYPE);
+    let _ = daemon.shutdown();
+    port
 }
