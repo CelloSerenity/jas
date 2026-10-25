@@ -46,6 +46,9 @@ isideload = { git = "https://github.com/nab138/isideload", optional = true, defa
   "install",
   "tokio-mt",
 ] }
+rustls = { version = "0.23", optional = true, default-features = false, features = [
+  "ring",
+] }
 idevice = { version = "0.1.61", optional = true, features = [
   "tcp",
   "tunnel_tcp_stack",
@@ -111,6 +114,7 @@ ssr = [
   "dep:mdns-sd",
   "dep:plist",
   "dep:zip",
+  "dep:rustls",
 ]
 
 [profile.wasm-release]

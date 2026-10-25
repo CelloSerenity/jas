@@ -444,103 +444,115 @@ pub async fn begin_login(
             .build()
             .expect("tokio runtime");
 
-        let outcome: Result<LoginData, String> = rt.block_on(async move {
-            let anisette_url = state_clone.anisette_url.read().await.clone();
-            let provider = sideload::build_anisette_provider(
-                &state_clone.db,
-                &apple_id_clone,
-                &anisette_url,
-            )
-            .await
-            .map_err(|e| format!("Anisette init: {e}"))?;
+        // Catch panics so the UI gets an error instead of polling forever.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            rt.block_on(async move {
+                let anisette_url = state_clone.anisette_url.read().await.clone();
+                let provider = sideload::build_anisette_provider(
+                    &state_clone.db,
+                    &apple_id_clone,
+                    &anisette_url,
+                )
+                .await
+                .map_err(|e| format!("Anisette init: {e}"))?;
 
-            let anisette_generator = isideload::anisette::AnisetteDataGenerator::new(Arc::new(
-                tokio::sync::RwLock::new(provider),
-            ));
+                let anisette_generator = isideload::anisette::AnisetteDataGenerator::new(Arc::new(
+                    tokio::sync::RwLock::new(provider),
+                ));
 
-            let mut account =
-                AppleAccount::new(&apple_id_clone, anisette_generator, false, None, None)
+                let mut account =
+                    AppleAccount::new(&apple_id_clone, anisette_generator, false, None, None)
+                        .await
+                        .map_err(|e| format!("Account init: {e}"))?;
+
+                // The callback is re-entered for every 2FA round trip (wrong code, a
+                // resend, switching methods), so the receiver lives behind a mutex to
+                // satisfy the `Sync` bound on the callback type.
+                let action_rx = Arc::new(std::sync::Mutex::new(action_rx));
+
+                account
+                    .login(&password_clone, move |params: TwoFactorCallbackParams| {
+                        let action_rx = action_rx.clone();
+                        let pending_clone = pending_clone.clone();
+                        async move {
+                            // Publish what Apple wants so the UI can render the right options.
+                            *pending_clone.prompt.lock().unwrap() =
+                                Some(TwoFactorPrompt::from(params));
+
+                            // Block until the web UI answers (5-minute timeout). This runs on
+                            // the dedicated login thread's runtime, so blocking here is fine.
+                            let action = action_rx.lock().ok().and_then(|rx| {
+                                rx.recv_timeout(std::time::Duration::from_secs(300)).ok()
+                            });
+
+                            Ok(match action {
+                                Some(TwoFactorAction::SubmitCode(code)) => {
+                                    TwoFactorCallbackResponse::SubmitCode(code)
+                                }
+                                Some(TwoFactorAction::SendSms(id)) => {
+                                    TwoFactorCallbackResponse::SendSms(id)
+                                }
+                                Some(TwoFactorAction::SendToDevices) => {
+                                    TwoFactorCallbackResponse::SendToDevices
+                                }
+                                Some(TwoFactorAction::ResendCode) => {
+                                    TwoFactorCallbackResponse::ResendCode
+                                }
+                                // Explicit cancel, or the user walked away.
+                                Some(TwoFactorAction::Abort) | None => {
+                                    TwoFactorCallbackResponse::Abort
+                                }
+                            })
+                        }
+                    })
                     .await
-                    .map_err(|e| format!("Account init: {e}"))?;
+                    .map_err(|e| format!("Login failed: {e}"))?;
 
-            // The callback is re-entered for every 2FA round trip (wrong code, a
-            // resend, switching methods), so the receiver lives behind a mutex to
-            // satisfy the `Sync` bound on the callback type.
-            let action_rx = Arc::new(std::sync::Mutex::new(action_rx));
+                // Serialize session.
+                let spd = account
+                    .spd
+                    .clone()
+                    .ok_or_else(|| "No session after login".to_string())?;
+                let mut spd_bytes = Vec::new();
+                plist::to_writer_xml(&mut spd_bytes, &spd)
+                    .map_err(|e| format!("Serialize SPD: {e}"))?;
 
-            account
-                .login(&password_clone, move |params: TwoFactorCallbackParams| {
-                    let action_rx = action_rx.clone();
-                    let pending_clone = pending_clone.clone();
-                    async move {
-                        // Publish what Apple wants so the UI can render the right options.
-                        *pending_clone.prompt.lock().unwrap() =
-                            Some(TwoFactorPrompt::from(params));
+                let xcode_token =
+                    sideload::cache_xcode_token_from_account(&state_clone.db, &mut account)
+                        .await
+                        .map_err(|e| format!("Cache xcode token: {e}"))?;
+                let adsid =
+                    sideload::adsid_from_spd(&spd).map_err(|e| format!("Read adsid: {e}"))?;
 
-                        // Block until the web UI answers (5-minute timeout). This runs on
-                        // the dedicated login thread's runtime, so blocking here is fine.
-                        let action = action_rx.lock().ok().and_then(|rx| {
-                            rx.recv_timeout(std::time::Duration::from_secs(300)).ok()
-                        });
+                // Build developer session directly from the freshly-minted token.
+                let mut dev_session = DeveloperSession::new(
+                    xcode_token,
+                    adsid,
+                    account.grandslam_client.clone(),
+                    account.anisette_generator.clone(),
+                );
 
-                        Ok(match action {
-                            Some(TwoFactorAction::SubmitCode(code)) => {
-                                TwoFactorCallbackResponse::SubmitCode(code)
-                            }
-                            Some(TwoFactorAction::SendSms(id)) => {
-                                TwoFactorCallbackResponse::SendSms(id)
-                            }
-                            Some(TwoFactorAction::SendToDevices) => {
-                                TwoFactorCallbackResponse::SendToDevices
-                            }
-                            Some(TwoFactorAction::ResendCode) => {
-                                TwoFactorCallbackResponse::ResendCode
-                            }
-                            // Explicit cancel, or the user walked away.
-                            Some(TwoFactorAction::Abort) | None => {
-                                TwoFactorCallbackResponse::Abort
-                            }
-                        })
-                    }
+                let teams = dev_session
+                    .list_teams()
+                    .await
+                    .map_err(|e| format!("ListTeams: {e}"))?;
+                let first_team = teams.into_iter().next();
+
+                Ok(LoginData {
+                    apple_id: apple_id_clone,
+                    session_plist: spd_bytes,
+                    team_id: first_team.as_ref().map(|t| t.team_id.clone()),
+                    team_name: first_team.as_ref().and_then(|t| t.name.clone()),
                 })
-                .await
-                .map_err(|e| format!("Login failed: {e}"))?;
-
-            // Serialize session.
-            let spd = account
-                .spd
-                .clone()
-                .ok_or_else(|| "No session after login".to_string())?;
-            let mut spd_bytes = Vec::new();
-            plist::to_writer_xml(&mut spd_bytes, &spd)
-                .map_err(|e| format!("Serialize SPD: {e}"))?;
-
-            let xcode_token =
-                sideload::cache_xcode_token_from_account(&state_clone.db, &mut account)
-                    .await
-                    .map_err(|e| format!("Cache xcode token: {e}"))?;
-            let adsid = sideload::adsid_from_spd(&spd).map_err(|e| format!("Read adsid: {e}"))?;
-
-            // Build developer session directly from the freshly-minted token.
-            let mut dev_session = DeveloperSession::new(
-                xcode_token,
-                adsid,
-                account.grandslam_client.clone(),
-                account.anisette_generator.clone(),
-            );
-
-            let teams = dev_session
-                .list_teams()
-                .await
-                .map_err(|e| format!("ListTeams: {e}"))?;
-            let first_team = teams.into_iter().next();
-
-            Ok(LoginData {
-                apple_id: apple_id_clone,
-                session_plist: spd_bytes,
-                team_id: first_team.as_ref().map(|t| t.team_id.clone()),
-                team_name: first_team.as_ref().and_then(|t| t.name.clone()),
             })
+        }));
+        let outcome: Result<LoginData, String> = outcome.unwrap_or_else(|panic| {
+            let msg = panic
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown panic".to_string());
+            Err(format!("Login crashed: {msg}"))
         });
 
         // Write result back. The session stays in the pending map until a caller

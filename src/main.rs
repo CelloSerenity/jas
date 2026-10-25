@@ -18,6 +18,12 @@ async fn main() {
         },
     };
 
+    // Both ring and aws-lc-rs end up enabled in the dependency tree, so rustls
+    // can't pick a default and reqwest panics on first use without this.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     // Load config.
     let config = Config::load();
 

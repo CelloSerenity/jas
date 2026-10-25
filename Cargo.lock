@@ -2210,6 +2210,7 @@ dependencies = [
  "plist",
  "rand 0.8.6",
  "rootcause",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.11.0",
