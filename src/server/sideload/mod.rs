@@ -24,8 +24,13 @@ use isideload::{
         app_ids::AppIdsApi, developer_session::DeveloperSession, devices::DevicesApi,
         teams::TeamsApi,
     },
-    sideload::{builder::MaxCertsBehavior, SideloaderBuilder, TeamSelection},
-    util::storage::SideloadingStorage,
+    sideload::{
+        builder::MaxCertsBehavior, sideloader::Sideloader, SideloaderBuilder, TeamSelection,
+    },
+    util::{
+        callbacks::{ExtensionsBehaviorCallbackBox, MaxCertsCallbackBox},
+        storage::SideloadingStorage,
+    },
 };
 use std::io::Write;
 
@@ -288,7 +293,7 @@ pub async fn restore_account(
         tokio::sync::RwLock::new(provider),
     ));
 
-    let mut account = AppleAccount::new(apple_id, anisette_generator, false)
+    let mut account = AppleAccount::new(apple_id, anisette_generator, false, None, None)
         .await
         .map_err(|e| anyhow::anyhow!("AppleAccount init failed: {e}"))?;
 
@@ -389,7 +394,7 @@ pub async fn get_dev_session(
                     .await
                     .map_err(|e| anyhow::anyhow!("Anisette get_client_info failed: {e}"))?;
                 let grandslam = std::sync::Arc::new(
-                    GrandSlam::new(client_info, false)
+                    GrandSlam::new(client_info, false, None)
                         .await
                         .map_err(|e| anyhow::anyhow!("GrandSlam init failed: {e}"))?,
                 );
@@ -573,12 +578,13 @@ pub async fn install_ipa(
 
     let dev_session = get_dev_session(pool, apple_id, encrypted_spd, crypto, anisette_url).await?;
 
-    let mut sideloader = SideloaderBuilder::new(dev_session, apple_id.to_string())
-        .team_selection(TeamSelection::First)
-        .max_certs_behavior(MaxCertsBehavior::Revoke)
-        .storage(Box::new(db_storage))
-        .machine_name("jas".to_string())
-        .build();
+    let mut sideloader: Sideloader<MaxCertsCallbackBox, ExtensionsBehaviorCallbackBox> =
+        SideloaderBuilder::new(dev_session, apple_id.to_string())
+            .team_selection(TeamSelection::First)
+            .max_certs_behavior(MaxCertsBehavior::Revoke)
+            .storage(Box::new(db_storage))
+            .machine_name("jas".to_string())
+            .build();
 
     let pairing_bytes = crypto
         .decrypt(encrypted_pairing)
@@ -599,7 +605,14 @@ pub async fn install_ipa(
 
     info!("Signing {ipa_path}");
     let (signed_path, _special) = sideloader
-        .sign_app(PathBuf::from(ipa_path), Some(team), true)
+        .sign_app(
+            PathBuf::from(ipa_path),
+            Some(team),
+            true,
+            None::<fn(f32) -> std::future::Ready<()>>,
+            None,
+            None,
+        )
         .await
         .map_err(|e| anyhow::anyhow!("sign_app failed: {e}"))?;
 

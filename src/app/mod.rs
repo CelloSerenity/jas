@@ -458,29 +458,32 @@ pub async fn begin_login(
                 tokio::sync::RwLock::new(provider),
             ));
 
-            let mut account = AppleAccount::new(&apple_id_clone, anisette_generator, false)
-                .await
-                .map_err(|e| format!("Account init: {e}"))?;
+            let mut account =
+                AppleAccount::new(&apple_id_clone, anisette_generator, false, None, None)
+                    .await
+                    .map_err(|e| format!("Account init: {e}"))?;
 
             // The callback is re-entered for every 2FA round trip (wrong code, a
             // resend, switching methods), so the receiver lives behind a mutex to
             // satisfy the `Sync` bound on the callback type.
-            let action_rx = std::sync::Mutex::new(action_rx);
+            let action_rx = Arc::new(std::sync::Mutex::new(action_rx));
 
             account
-                .login(
-                    &password_clone,
-                    Box::new(move |params: TwoFactorCallbackParams| {
+                .login(&password_clone, move |params: TwoFactorCallbackParams| {
+                    let action_rx = action_rx.clone();
+                    let pending_clone = pending_clone.clone();
+                    async move {
                         // Publish what Apple wants so the UI can render the right options.
                         *pending_clone.prompt.lock().unwrap() =
                             Some(TwoFactorPrompt::from(params));
 
-                        // Block until the web UI answers (5-minute timeout).
+                        // Block until the web UI answers (5-minute timeout). This runs on
+                        // the dedicated login thread's runtime, so blocking here is fine.
                         let action = action_rx.lock().ok().and_then(|rx| {
                             rx.recv_timeout(std::time::Duration::from_secs(300)).ok()
                         });
 
-                        match action {
+                        Ok(match action {
                             Some(TwoFactorAction::SubmitCode(code)) => {
                                 TwoFactorCallbackResponse::SubmitCode(code)
                             }
@@ -497,9 +500,9 @@ pub async fn begin_login(
                             Some(TwoFactorAction::Abort) | None => {
                                 TwoFactorCallbackResponse::Abort
                             }
-                        }
-                    }),
-                )
+                        })
+                    }
+                })
                 .await
                 .map_err(|e| format!("Login failed: {e}"))?;
 
@@ -703,6 +706,7 @@ pub async fn export_livecontainer_cert(
     use isideload::{
         dev::teams::TeamsApi,
         sideload::{builder::MaxCertsBehavior, cert_identity::CertificateIdentity},
+        util::callbacks::MaxCertsCallbackBox,
     };
     use leptos::prelude::use_context;
 
@@ -758,7 +762,7 @@ pub async fn export_livecontainer_cert(
         &mut dev_session,
         &team,
         &db_storage,
-        &MaxCertsBehavior::Revoke,
+        &MaxCertsBehavior::<MaxCertsCallbackBox>::Revoke,
     )
     .await
     .map_err(|e| ServerFnError::new(format!("Failed to retrieve certificate: {e}")))?;
