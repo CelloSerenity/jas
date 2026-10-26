@@ -25,7 +25,8 @@ use isideload::{
         teams::TeamsApi,
     },
     sideload::{
-        builder::MaxCertsBehavior, sideloader::Sideloader, SideloaderBuilder, TeamSelection,
+        builder::{ExtensionsBehavior, ExtensionsBehaviorSelection, MaxCertsBehavior},
+        sideloader::Sideloader, SideloaderBuilder, TeamSelection,
     },
     util::{
         callbacks::{ExtensionsBehaviorCallbackBox, MaxCertsCallbackBox},
@@ -583,6 +584,7 @@ pub async fn install_ipa(
         SideloaderBuilder::new(dev_session, apple_id.to_string())
             .team_selection(TeamSelection::First)
             .max_certs_behavior(MaxCertsBehavior::Revoke)
+            .extensions_behavior(ExtensionsBehaviorSelection::Fixed(ExtensionsBehavior::ReuseMain))
             .storage(Box::new(db_storage))
             .machine_name("jas".to_string())
             .build();
