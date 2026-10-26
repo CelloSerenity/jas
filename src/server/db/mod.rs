@@ -96,11 +96,12 @@ pub async fn get_device(pool: &SqlitePool, id: &str) -> sqlx::Result<Option<Devi
     .await
 }
 
-pub async fn update_device_mdns_ip(pool: &SqlitePool, id: &str, ip: &str) -> sqlx::Result<()> {
+pub async fn update_device_mdns_ip(pool: &SqlitePool, id: &str, ip: &str, port: i64) -> sqlx::Result<()> {
     let now = chrono::Utc::now().timestamp();
     sqlx::query!(
-        "UPDATE devices SET mdns_ip = ?, mdns_seen_at = ? WHERE id = ?",
+        "UPDATE devices SET mdns_ip = ?, port = ?, mdns_seen_at = ? WHERE id = ?",
         ip,
+        port,
         now,
         id
     )
