@@ -1,7 +1,7 @@
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
-    use axum::Router;
+    use axum::{extract::DefaultBodyLimit, Router};
     use leptos::prelude::*;
     use leptos_axum::{generate_route_list, LeptosRoutes};
     use tokio::sync::mpsc;
@@ -109,6 +109,7 @@ async fn main() {
                 },
             )
             .fallback(leptos_axum::file_and_error_handler(jas::app::shell))
+            .layer(DefaultBodyLimit::disable())
             .with_state(leptos_options);
 
         info!("Listening on http://{addr}");
