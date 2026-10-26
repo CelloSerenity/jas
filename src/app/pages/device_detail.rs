@@ -903,7 +903,7 @@ fn JobProgress(
     let is_done = move || {
         job.get()
             .and_then(|r| r.ok())
-            .map(|j| j.status == "done" || j.status == "failed")
+            .map(|j| matches!(j.status.as_str(), "done" | "failed" | "cancelled"))
             .unwrap_or(false)
     };
 
