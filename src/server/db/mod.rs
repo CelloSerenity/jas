@@ -473,7 +473,7 @@ pub async fn update_job_progress(
     progress: i64,
     stage: &str,
 ) -> sqlx::Result<()> {
-    sqlx::query("UPDATE jobs SET progress = ?, stage = ? WHERE id = ?")
+    sqlx::query("UPDATE jobs SET progress = ?, stage = ? WHERE id = ? AND status = 'running'")
         .bind(progress)
         .bind(stage)
         .bind(id)
@@ -499,29 +499,36 @@ pub async fn update_job_status(
     id: &str,
     status: &str,
     error: Option<&str>,
-) -> sqlx::Result<()> {
+) -> sqlx::Result<bool> {
     let now = chrono::Utc::now().timestamp();
-    if status == "running" {
-        sqlx::query!(
-            "UPDATE jobs SET status = ?, started_at = ? WHERE id = ?",
-            status,
-            now,
-            id
-        )
-        .execute(pool)
-        .await?;
+    let result = if status == "running" {
+        sqlx::query("UPDATE jobs SET status = ?, started_at = ? WHERE id = ? AND status = 'queued'")
+            .bind(status)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?
     } else {
-        sqlx::query!(
-            "UPDATE jobs SET status = ?, error = ?, finished_at = ? WHERE id = ?",
-            status,
-            error,
-            now,
-            id
-        )
-        .execute(pool)
-        .await?;
-    }
-    Ok(())
+        sqlx::query("UPDATE jobs SET status = ?, error = ?, finished_at = ? WHERE id = ? AND status = 'running'")
+            .bind(status)
+            .bind(error)
+            .bind(now)
+            .bind(id)
+            .execute(pool)
+            .await?
+    };
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn cancel_job(pool: &SqlitePool, id: &str) -> sqlx::Result<bool> {
+    let result = sqlx::query(
+        "UPDATE jobs SET status = 'cancelled', finished_at = ? WHERE id = ? AND status IN ('queued', 'running')",
+    )
+    .bind(chrono::Utc::now().timestamp())
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn apps_needing_refresh(

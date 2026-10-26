@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use leptos_router::components::A;
 
-use crate::app::{list_jobs, QueueEntry};
+use crate::app::{list_jobs, CancelJob, QueueEntry};
 
 fn format_ts(ts: Option<i64>) -> String {
     match ts {
@@ -25,7 +25,14 @@ fn status_badge_class(status: &str) -> &'static str {
 #[component]
 pub fn Queue() -> impl IntoView {
     let trigger = RwSignal::new(0u32);
+    let cancel_action = ServerAction::<CancelJob>::new();
     let jobs = Resource::new(move || trigger.get(), |_| list_jobs());
+
+    Effect::new(move |_| {
+        if cancel_action.version().get() > 0 {
+            jobs.refetch();
+        }
+    });
 
     let has_active = move || {
         jobs.get()
@@ -67,6 +74,10 @@ pub fn Queue() -> impl IntoView {
                 </button>
             </div>
 
+            {move || cancel_action.value().get().and_then(Result::err).map(|e| view! {
+                <p class="error">"Cancel failed: " {e.to_string()}</p>
+            })}
+
             <Suspense fallback=|| view! { <p class="loading">"Loading jobs…"</p> }>
                 {move || {
                     jobs.get()
@@ -91,6 +102,7 @@ pub fn Queue() -> impl IntoView {
                                                 <th>"Status"</th>
                                                 <th>"Started"</th>
                                                 <th>"Finished"</th>
+                                                <th>"Actions"</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -102,6 +114,7 @@ pub fn Queue() -> impl IntoView {
                                                         j.device_id,
                                                     );
                                                     let is_running = j.status == "running";
+                                                    let is_active = is_running || j.status == "queued";
                                                     let badge_class = status_badge_class(
                                                         &j.status,
                                                     );
@@ -159,6 +172,19 @@ pub fn Queue() -> impl IntoView {
                                                             </td>
                                                             <td>{format_ts(j.started_at)}</td>
                                                             <td>{format_ts(j.finished_at)}</td>
+                                                            <td>
+                                                                {is_active.then(|| view! {
+                                                                    <button
+                                                                        class="btn btn-sm btn-secondary"
+                                                                        prop:disabled=move || cancel_action.pending().get()
+                                                                        on:click=move |_| {
+                                                                            cancel_action.dispatch(CancelJob { job_id: j.id.clone() });
+                                                                        }
+                                                                    >
+                                                                        "Cancel"
+                                                                    </button>
+                                                                })}
+                                                            </td>
                                                         </tr>
                                                     }
                                                 })

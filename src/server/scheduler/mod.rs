@@ -181,23 +181,50 @@ async fn execute_job(state: AppState, req: JobRequest) {
         }
     );
 
-    if let Err(e) = db::update_job_status(&state.db, job_id, "running", None).await {
-        error!("Job {job_id}: failed to mark running: {e}");
-        return;
+    match db::update_job_status(&state.db, job_id, "running", None).await {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(e) => {
+            error!("Job {job_id}: failed to mark running: {e}");
+            return;
+        }
     }
 
-    let result = run_job(&state, &req).await;
+    let result = tokio::select! {
+        _ = wait_for_cancellation(&state, job_id) => {
+            info!("Job {job_id} cancelled");
+            return;
+        }
+        result = run_job(&state, &req) => result,
+    };
 
     match result {
         Ok(real_bundle_id) => {
-            let _ = db::update_job_status(&state.db, job_id, "done", None).await;
-            let _ = db::mark_app_installed(&state.db, &req.app_id, &real_bundle_id).await;
-            info!("Job {job_id} complete (bundle id: {real_bundle_id})");
+            if matches!(
+                db::update_job_status(&state.db, job_id, "done", None).await,
+                Ok(true)
+            ) {
+                let _ = db::mark_app_installed(&state.db, &req.app_id, &real_bundle_id).await;
+                info!("Job {job_id} complete (bundle id: {real_bundle_id})");
+            }
         }
         Err(e) => {
             let msg = e.to_string();
             error!("Job {job_id} failed: {msg}");
             let _ = db::update_job_status(&state.db, job_id, "failed", Some(&msg)).await;
+        }
+    }
+}
+
+async fn wait_for_cancellation(state: &AppState, job_id: &str) {
+    let mut ticker = tokio::time::interval(Duration::from_millis(250));
+    loop {
+        ticker.tick().await;
+        match db::get_job(&state.db, job_id).await {
+            Ok(Some(job)) if job.status == "cancelled" => return,
+            Ok(None) => return,
+            Err(e) => warn!("Job {job_id}: failed to check cancellation: {e}"),
+            _ => {}
         }
     }
 }
