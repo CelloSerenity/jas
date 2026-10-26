@@ -95,7 +95,10 @@ To run on Linux (Place /target/site next to the jas binary):
 JAS_SECRET_KEY=<32-byte-hex> ./jas
 ```
 
-The `JAS_SECRET_KEY` flag is optional but protects your data locally. You can build the project yourself or download a prebuilt binary from [GitHub Actions](https://github.com/jkcoxson/jas/actions).
+The `JAS_SECRET_KEY` flag is optional but protects your data locally. You can
+build the project yourself or download a ZIP for your platform from the
+[nightly release](https://github.com/jkcoxson/jas/releases/tag/nightly).
+Each ZIP contains the binary and `target/site` assets.
 
 ---
 
