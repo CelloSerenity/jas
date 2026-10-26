@@ -39,19 +39,21 @@ use crate::server::{crypto::Crypto, db::storage::DbStorage};
 
 async fn open_cdtunnel(
     device_ip: &str,
+    port: i64,
     pairing_bytes: &[u8],
 ) -> anyhow::Result<(tcp::handle::AdapterHandle, RsdHandshake)> {
     let mut rpf = RpPairingFile::from_bytes(pairing_bytes)
         .map_err(|e| anyhow::anyhow!("Invalid pairing file: {e:?}"))?;
 
-    info!("Connecting to RPPairing at {device_ip}:49152");
+    let port = u16::try_from(port).map_err(|_| anyhow::anyhow!("Invalid Remote Pairing port: {port}"))?;
+    info!("Connecting to RPPairing at {device_ip}:{port}");
     let stream = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        tokio::net::TcpStream::connect((device_ip, 49152u16)),
+        tokio::net::TcpStream::connect((device_ip, port)),
     )
     .await
-    .map_err(|_| anyhow::anyhow!("TCP connect to {device_ip}:49152 timed out"))?
-    .map_err(|e| anyhow::anyhow!("TCP connect to {device_ip}:49152 failed: {e}"))?;
+    .map_err(|_| anyhow::anyhow!("TCP connect to {device_ip}:{port} timed out"))?
+    .map_err(|e| anyhow::anyhow!("TCP connect to {device_ip}:{port} failed: {e}"))?;
 
     let socket = RpPairingSocket::new(stream);
     let mut rpc = RemotePairingClient::new(socket, "jas");
@@ -110,11 +112,12 @@ async fn open_cdtunnel(
 async fn open_cdtunnel_preferring_mdns(
     manual_ip: &str,
     mdns_ip: Option<&str>,
+    port: i64,
     pairing_bytes: &[u8],
 ) -> anyhow::Result<(tcp::handle::AdapterHandle, RsdHandshake)> {
     if let Some(ip) = mdns_ip {
         if ip != manual_ip {
-            match open_cdtunnel(ip, pairing_bytes).await {
+            match open_cdtunnel(ip, port, pairing_bytes).await {
                 Ok(out) => return Ok(out),
                 Err(e) => {
                     info!("mDNS IP {ip} failed ({e}); falling back to manual IP {manual_ip}");
@@ -122,16 +125,17 @@ async fn open_cdtunnel_preferring_mdns(
             }
         }
     }
-    open_cdtunnel(manual_ip, pairing_bytes).await
+    open_cdtunnel(manual_ip, port, pairing_bytes).await
 }
 
 pub async fn list_installed_bundle_ids(
     device_ip: &str,
     mdns_ip: Option<&str>,
+    port: i64,
     pairing_bytes: &[u8],
 ) -> anyhow::Result<std::collections::HashSet<String>> {
     let (mut handle, mut handshake) =
-        open_cdtunnel_preferring_mdns(device_ip, mdns_ip, pairing_bytes).await?;
+        open_cdtunnel_preferring_mdns(device_ip, mdns_ip, port, pairing_bytes).await?;
 
     let mut instproxy = InstallationProxyClient::connect_rsd(&mut handle, &mut handshake)
         .await
@@ -158,11 +162,12 @@ pub async fn list_installed_bundle_ids(
 pub async fn uninstall_app(
     device_ip: &str,
     mdns_ip: Option<&str>,
+    port: i64,
     pairing_bytes: &[u8],
     bundle_id: &str,
 ) -> anyhow::Result<()> {
     let (mut handle, mut handshake) =
-        open_cdtunnel_preferring_mdns(device_ip, mdns_ip, pairing_bytes).await?;
+        open_cdtunnel_preferring_mdns(device_ip, mdns_ip, port, pairing_bytes).await?;
 
     let mut instproxy = InstallationProxyClient::connect_rsd(&mut handle, &mut handshake)
         .await
@@ -181,9 +186,10 @@ pub async fn uninstall_app(
 /// Connect to a device, verify the pairing file, and return its UDID and name via lockdown
 pub async fn fetch_device_identity(
     device_ip: &str,
+    port: i64,
     pairing_bytes: &[u8],
 ) -> anyhow::Result<(String, String)> {
-    let (mut handle, mut handshake) = open_cdtunnel(device_ip, pairing_bytes).await?;
+    let (mut handle, mut handshake) = open_cdtunnel(device_ip, port, pairing_bytes).await?;
 
     let mut lockdown = handshake
         .connect::<LockdownClient>(&mut handle)
@@ -209,37 +215,38 @@ pub async fn fetch_device_identity(
     Ok((udid, name))
 }
 
-/// TCP-level reachability check on port 49152 against a single address.
+/// TCP-level reachability check against a single address and the device pairing port.
 /// Returns round-trip ms.
-async fn tcp_ping_one(ip: &str) -> anyhow::Result<u64> {
+async fn tcp_ping_one(ip: &str, port: i64) -> anyhow::Result<u64> {
+    let port = u16::try_from(port).map_err(|_| anyhow::anyhow!("Invalid Remote Pairing port: {port}"))?;
     let start = std::time::Instant::now();
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        tokio::net::TcpStream::connect((ip, 49152u16)),
+        tokio::net::TcpStream::connect((ip, port)),
     )
     .await
-    .map_err(|_| anyhow::anyhow!("TCP connect to {ip}:49152 timed out"))?
-    .map_err(|e| anyhow::anyhow!("TCP connect to {ip}:49152 failed: {e}"))?;
+    .map_err(|_| anyhow::anyhow!("TCP connect to {ip}:{port} timed out"))?
+    .map_err(|e| anyhow::anyhow!("TCP connect to {ip}:{port} failed: {e}"))?;
     Ok(start.elapsed().as_millis() as u64)
 }
 
-/// TCP-level reachability check on port 49152, preferring the mDNS-discovered
+/// TCP-level reachability check on the device pairing port, preferring the mDNS-discovered
 /// LAN IP and falling back to the manually configured IP when that fails. This
 /// mirrors `open_cdtunnel_preferring_mdns` so a stale mDNS address never blocks
 /// an operation that would have succeeded over the manual IP.
-pub async fn tcp_ping(device_ip: &str, mdns_ip: Option<&str>) -> anyhow::Result<u64> {
+pub async fn tcp_ping(device_ip: &str, mdns_ip: Option<&str>, port: i64) -> anyhow::Result<u64> {
     if let Some(ip) = mdns_ip.filter(|&m| m != device_ip) {
-        match tcp_ping_one(ip).await {
+        match tcp_ping_one(ip, port).await {
             Ok(ms) => return Ok(ms),
             Err(e) => {
                 info!("mDNS IP {ip} unreachable ({e}); falling back to manual IP {device_ip}");
-                return tcp_ping_one(device_ip).await.map_err(|manual_err| {
+                return tcp_ping_one(device_ip, port).await.map_err(|manual_err| {
                     anyhow::anyhow!("{manual_err} (mDNS IP also unreachable: {e})")
                 });
             }
         }
     }
-    tcp_ping_one(device_ip).await
+    tcp_ping_one(device_ip, port).await
 }
 
 /// Parse a pairing plist to confirm it is structurally valid.
@@ -567,6 +574,7 @@ pub async fn install_ipa(
     encrypted_spd: &[u8],
     device_ip: &str,
     mdns_ip: Option<&str>,
+    port: i64,
     device_name: &str,
     device_udid: &str,
     encrypted_pairing: &[u8],
@@ -594,7 +602,7 @@ pub async fn install_ipa(
         .map_err(|_| anyhow::anyhow!("Failed to decrypt pairing file"))?;
 
     let (mut handle, mut handshake) =
-        open_cdtunnel_preferring_mdns(device_ip, mdns_ip, &pairing_bytes).await?;
+        open_cdtunnel_preferring_mdns(device_ip, mdns_ip, port, &pairing_bytes).await?;
 
     let team = sideloader
         .get_team()
@@ -727,6 +735,7 @@ pub async fn refresh_provisioning_profile(
     encrypted_spd: &[u8],
     device_ip: &str,
     mdns_ip: Option<&str>,
+    port: i64,
     encrypted_pairing: &[u8],
     bundle_id: &str,
     anisette_url: &str,
@@ -766,7 +775,7 @@ pub async fn refresh_provisioning_profile(
         .map_err(|_| anyhow::anyhow!("Failed to decrypt pairing file"))?;
 
     let (mut handle, mut handshake) =
-        open_cdtunnel_preferring_mdns(device_ip, mdns_ip, &pairing_bytes).await?;
+        open_cdtunnel_preferring_mdns(device_ip, mdns_ip, port, &pairing_bytes).await?;
 
     info!("Connecting Misagent");
     let mut misagent = MisagentClient::connect_rsd(&mut handle, &mut handshake)
