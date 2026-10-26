@@ -611,8 +611,8 @@ pub async fn install_ipa(
             Some(team),
             true,
             None::<fn(f32) -> std::future::Ready<()>>,
-            None,
-            None,
+            Some(&pairing_bytes),
+            Some(device_udid),
         )
         .await
         .map_err(|e| anyhow::anyhow!("sign_app failed: {e}"))?;
