@@ -12,8 +12,8 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-          - os: ubuntu-24.04-arm
-          - os: macos-26
+          - os: ubuntu-26.04-arm
+          - os: xcode-27
           - os: macos-26-intel
           - os: windows-latest
 
@@ -28,8 +28,8 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Install OpenSSL on ubuntu-24.04-arm
-        if: matrix.os == 'ubuntu-24.04-arm'
+      - name: Install OpenSSL on ubuntu-26.04-arm
+        if: matrix.os == 'ubuntu-26.04-arm'
         run: |
           sudo apt-get update
           sudo apt-get install -y libssl-dev
