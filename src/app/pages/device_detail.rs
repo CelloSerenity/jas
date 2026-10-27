@@ -956,11 +956,13 @@ fn JobProgress(
                                     _ => "job-badge job-queued",
                                 };
                                 let is_running = j.status == "running";
+                                let show_stage = is_running || (j.status == "done"
+                                    && j.stage.as_deref().is_some_and(|s| s.starts_with("Verified;")));
                                 let progress = j.progress;
                                 let stage = j.stage.clone();
                                 view! {
                                     <span class=badge_class>{j.status.clone()}</span>
-                                    {is_running
+                                    {show_stage
                                         .then(|| {
                                             stage
                                                 .map(|s| {

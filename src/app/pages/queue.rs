@@ -123,6 +123,8 @@ pub fn Queue() -> impl IntoView {
                                                     let is_running = j.status == "running";
                                                     let is_active = is_running || j.status == "queued";
                                                     let is_finished = matches!(j.status.as_str(), "done" | "failed" | "cancelled");
+                                                    let show_stage = is_running || (j.status == "done"
+                                                        && j.stage.as_deref().is_some_and(|s| s.starts_with("Verified;")));
                                                     let cancel_job_id = j.id.clone();
                                                     let badge_class = status_badge_class(
                                                         &j.status,
@@ -146,7 +148,7 @@ pub fn Queue() -> impl IntoView {
                                                                 <span class=badge_class>
                                                                     {j.status.clone()}
                                                                 </span>
-                                                                {is_running
+                                                                {show_stage
                                                                     .then(|| {
                                                                         stage
                                                                             .map(|s| {

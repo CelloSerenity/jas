@@ -473,7 +473,10 @@ pub async fn update_job_progress(
     progress: i64,
     stage: &str,
 ) -> sqlx::Result<()> {
-    sqlx::query("UPDATE jobs SET progress = ?, stage = ? WHERE id = ? AND status = 'running'")
+    sqlx::query(
+        "UPDATE jobs SET progress = ?, stage = ? WHERE id = ? AND status = 'running' \
+         AND (stage IS NULL OR stage NOT LIKE 'Verified;%')",
+    )
         .bind(progress)
         .bind(stage)
         .bind(id)

@@ -42,6 +42,7 @@ thiserror = { version = "2" }
 base64 = { version = "0.23" }
 
 # SSR-only
+apple-codesign-quick = { version = "0.1", optional = true }
 isideload = { git = "https://github.com/nab138/isideload", optional = true, default-features = false, features = [
   "install",
   "tokio-mt",
@@ -92,6 +93,7 @@ hydrate = [
   "dep:web-sys",
 ]
 ssr = [
+  "dep:apple-codesign-quick",
   "dep:axum",
   "dep:tokio",
   "dep:leptos_axum",

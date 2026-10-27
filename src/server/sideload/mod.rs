@@ -37,6 +37,91 @@ use std::io::Write;
 
 use crate::server::{crypto::Crypto, db::storage::DbStorage};
 
+#[derive(Debug, thiserror::Error)]
+#[error("Refresh verification failed: {0}")]
+pub struct RefreshVerificationError(String);
+
+struct ProfileDetails {
+    uuid: String,
+    application_id: String,
+    team_id: String,
+    expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+fn profile_details(bytes: &[u8]) -> anyhow::Result<ProfileDetails> {
+    let profile = apple_codesign_quick::ProvisioningProfile::parse(bytes)
+        .map_err(|e| anyhow::anyhow!("Invalid provisioning profile: {e}"))?;
+    let uuid = profile
+        .plist()
+        .get("UUID")
+        .and_then(plist::Value::as_string)
+        .ok_or_else(|| anyhow::anyhow!("Profile has no UUID"))?;
+    let application_id = profile
+        .entitlements()
+        .get("application-identifier")
+        .and_then(plist::Value::as_string)
+        .ok_or_else(|| anyhow::anyhow!("Profile has no application identifier"))?;
+    let expiration = profile
+        .plist()
+        .get("ExpirationDate")
+        .and_then(plist::Value::as_date)
+        .ok_or_else(|| anyhow::anyhow!("Profile has no expiration date"))?;
+    Ok(ProfileDetails {
+        uuid: uuid.to_string(),
+        application_id: application_id.to_string(),
+        team_id: profile.team_id().to_string(),
+        expires_at: std::time::SystemTime::from(expiration).into(),
+    })
+}
+
+async fn installed_profiles(client: &mut MisagentClient) -> anyhow::Result<Vec<ProfileDetails>> {
+    let profiles = client
+        .copy_all()
+        .await
+        .map_err(|e| anyhow::anyhow!("Reading installed profiles failed: {e:?}"))?;
+    Ok(profiles
+        .iter()
+        .filter_map(|bytes| profile_details(bytes).ok())
+        .collect())
+}
+
+fn previous_expiry(
+    expected: &ProfileDetails,
+    installed: &[ProfileDetails],
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    installed
+        .iter()
+        .filter(|p| p.application_id == expected.application_id && p.team_id == expected.team_id)
+        .map(|p| p.expires_at)
+        .max()
+}
+
+fn verify_refreshed_profile(
+    expected: &ProfileDetails,
+    previous: Option<chrono::DateTime<chrono::Utc>>,
+    installed: &[ProfileDetails],
+) -> anyhow::Result<chrono::DateTime<chrono::Utc>> {
+    anyhow::ensure!(
+        expected.expires_at > chrono::Utc::now(),
+        "The refreshed profile is already expired"
+    );
+    if let Some(previous) = previous {
+        anyhow::ensure!(
+            expected.expires_at > previous,
+            "Profile expiration did not advance (previous: {previous}, received: {})",
+            expected.expires_at
+        );
+    }
+    anyhow::ensure!(
+        installed.iter().any(|p| p.uuid == expected.uuid
+            && p.application_id == expected.application_id
+            && p.team_id == expected.team_id
+            && p.expires_at == expected.expires_at),
+        "The refreshed profile was not found on the device"
+    );
+    Ok(expected.expires_at)
+}
+
 async fn open_cdtunnel(
     device_ip: &str,
     port: i64,
@@ -579,9 +664,10 @@ pub async fn install_ipa(
     device_udid: &str,
     encrypted_pairing: &[u8],
     ipa_path: &str,
+    verify_refresh: bool,
     anisette_url: &str,
     progress_cb: impl Fn(u64, &'static str) + Send + 'static,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<(String, Option<chrono::DateTime<chrono::Utc>>)> {
     let db_storage = DbStorage::load(pool.clone(), &account_storage_prefix(apple_id))
         .await
         .map_err(|e| anyhow::anyhow!("Storage load failed: {e}"))?;
@@ -626,6 +712,17 @@ pub async fn install_ipa(
         )
         .await
         .map_err(|e| anyhow::anyhow!("sign_app failed: {e}"))?;
+
+    let refresh_profile = if verify_refresh {
+        let bytes = tokio::fs::read(signed_path.join("embedded.mobileprovision")).await?;
+        let expected = profile_details(&bytes)?;
+        let mut misagent = MisagentClient::connect_rsd(&mut handle, &mut handshake).await
+            .map_err(|e| anyhow::anyhow!("Misagent connect failed: {e:?}"))?;
+        let previous = previous_expiry(&expected, &installed_profiles(&mut misagent).await?);
+        Some((expected, previous))
+    } else {
+        None
+    };
 
     let real_bundle_id = {
         let p = signed_path.clone();
@@ -723,8 +820,17 @@ pub async fn install_ipa(
         .await
         .map_err(|e| anyhow::anyhow!("instproxy install failed: {e:?}"))?;
 
+    let verified_expiry = if let Some((expected, previous)) = refresh_profile {
+        let mut misagent = MisagentClient::connect_rsd(&mut handle, &mut handshake).await
+            .map_err(|e| anyhow::anyhow!("Misagent connect failed: {e:?}"))?;
+        let installed = installed_profiles(&mut misagent).await?;
+        Some(verify_refreshed_profile(&expected, previous, &installed)?)
+    } else {
+        None
+    };
+
     info!("Install complete");
-    Ok(real_bundle_id)
+    Ok((real_bundle_id, verified_expiry))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -739,7 +845,7 @@ pub async fn refresh_provisioning_profile(
     encrypted_pairing: &[u8],
     bundle_id: &str,
     anisette_url: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<chrono::DateTime<chrono::Utc>> {
     let mut dev_session = get_dev_session(pool, apple_id, encrypted_spd, crypto, anisette_url).await?;
 
     let teams = dev_session
@@ -783,6 +889,11 @@ pub async fn refresh_provisioning_profile(
         .map_err(|e| anyhow::anyhow!("Misagent connect failed: {e:?}"))?;
 
     let profile_bytes: Vec<u8> = profile.encoded_profile.as_ref().to_vec();
+    let expected = profile_details(&profile_bytes)
+        .map_err(|e| RefreshVerificationError(e.to_string()))?;
+    let installed = installed_profiles(&mut misagent).await
+        .map_err(|e| RefreshVerificationError(e.to_string()))?;
+    let previous = previous_expiry(&expected, &installed);
     info!(
         "Installing provisioning profile {} ({} bytes)",
         profile.uuid,
@@ -793,6 +904,10 @@ pub async fn refresh_provisioning_profile(
         .await
         .map_err(|e| anyhow::anyhow!("Misagent install failed: {e:?}"))?;
 
-    info!("Refresh complete");
-    Ok(())
+    let installed = installed_profiles(&mut misagent).await
+        .map_err(|e| RefreshVerificationError(e.to_string()))?;
+    let expires_at = verify_refreshed_profile(&expected, previous, &installed)
+        .map_err(|e| RefreshVerificationError(e.to_string()))?;
+    info!("Refresh verified; expires {expires_at}");
+    Ok(expires_at)
 }

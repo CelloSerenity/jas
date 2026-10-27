@@ -266,10 +266,12 @@ async fn run_job(state: &AppState, req: &JobRequest) -> anyhow::Result<String> {
         )
         .await
         {
-            Ok(()) => {
-                let _ = db::update_job_progress(&state.db, &job_id, 100, "refreshing").await;
+            Ok(expires_at) => {
+                let stage = format!("Verified; expires {expires_at}");
+                let _ = db::update_job_progress(&state.db, &job_id, 100, &stage).await;
                 return Ok(app.bundle_id);
             }
+            Err(e) if e.is::<crate::server::sideload::RefreshVerificationError>() => return Err(e),
             Err(e) => {
                 warn!("Job {job_id}: profile refresh failed, falling back to full install: {e}");
             }
@@ -289,7 +291,7 @@ async fn run_job(state: &AppState, req: &JobRequest) -> anyhow::Result<String> {
 
     let db = state.db.clone();
     let job_id = req.job_id.clone();
-    crate::server::sideload::install_ipa(
+    let (bundle_id, verified_expiry) = crate::server::sideload::install_ipa(
         &state.db,
         &state.crypto,
         &account_row.apple_id,
@@ -301,6 +303,7 @@ async fn run_job(state: &AppState, req: &JobRequest) -> anyhow::Result<String> {
         &device.udid,
         &device.pairing_blob,
         &ipa_path,
+        matches!(req.kind, JobKind::Refresh),
         &anisette_url,
         move |progress, stage| {
             let db = db.clone();
@@ -312,5 +315,10 @@ async fn run_job(state: &AppState, req: &JobRequest) -> anyhow::Result<String> {
             });
         },
     )
-    .await
+    .await?;
+    if let Some(expires_at) = verified_expiry {
+        let stage = format!("Verified; expires {expires_at}");
+        let _ = db::update_job_progress(&state.db, &req.job_id, 100, &stage).await;
+    }
+    Ok(bundle_id)
 }
