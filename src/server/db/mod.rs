@@ -531,6 +531,16 @@ pub async fn cancel_job(pool: &SqlitePool, id: &str) -> sqlx::Result<bool> {
     Ok(result.rows_affected() > 0)
 }
 
+pub async fn delete_finished_job(pool: &SqlitePool, id: &str) -> sqlx::Result<bool> {
+    let result = sqlx::query(
+        "DELETE FROM jobs WHERE id = ? AND status IN ('done', 'failed', 'cancelled')",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn apps_needing_refresh(
     pool: &SqlitePool,
     window_days: i64,
