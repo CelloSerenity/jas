@@ -29,7 +29,6 @@ web-sys = { version = "0.3", features = [
   "File",
   "FileList",
   "FileReader",
-  "HtmlAnchorElement",
   "HtmlElement",
   "HtmlInputElement",
   "Window",

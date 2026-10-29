@@ -3,7 +3,7 @@ use leptos_router::hooks::use_params_map;
 
 use crate::app::components::{confirm, round_up_duration};
 use crate::app::{
-    ChangeDeviceIp, DeleteApp, ExportPairing, InstallIpa, ReconcileApps, RefreshApp, RefreshDevice,
+    ChangeDeviceIp, DeleteApp, InstallIpa, ReconcileApps, RefreshApp, RefreshDevice,
     ReimportPairing, SetRefreshEnabled, get_device_info, job_status, list_accounts, list_apps,
     probe_device,
 };
@@ -102,24 +102,6 @@ fn ConnectionBadge(device_id: Signal<String>) -> impl IntoView {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-fn trigger_pairing_download(bytes_b64: &str) {
-    use wasm_bindgen::JsCast;
-
-    let data_url = format!("data:application/octet-stream;base64,{bytes_b64}");
-    let Some(window) = web_sys::window() else { return };
-    let Some(document) = window.document() else { return };
-    let Ok(el) = document.create_element("a") else { return };
-    let Ok(a) = el.dyn_into::<web_sys::HtmlAnchorElement>() else { return };
-    a.set_href(&data_url);
-    a.set_download("pairingFile.plist");
-    if let Some(body) = document.body() {
-        let _ = body.append_child(&a);
-        a.click();
-        let _ = body.remove_child(&a);
-    }
-}
-
 // ── DeviceManagementCard ─────────────────────────────────────────────────────
 // Extracted into its own component to keep DeviceDetail's view type shallow
 // enough for the compiler's query-depth limit.
@@ -130,7 +112,6 @@ fn DeviceManagementCard(
     on_device_changed: Callback<()>,
     on_installed: Callback<()>,
 ) -> impl IntoView {
-    let export_action = ServerAction::<ExportPairing>::new();
     let reimport_action = ServerAction::<ReimportPairing>::new();
     let change_ip_action = ServerAction::<ChangeDeviceIp>::new();
 
@@ -145,13 +126,6 @@ fn DeviceManagementCard(
         if let Some(Ok(())) = change_ip_action.value().get() {
             on_device_changed.run(());
             show_change_ip.set(false);
-        }
-    });
-
-    Effect::new(move |_| {
-        if let Some(Ok(ref _b64)) = export_action.value().get() {
-            #[cfg(target_arch = "wasm32")]
-            trigger_pairing_download(_b64);
         }
     });
 
@@ -173,26 +147,13 @@ fn DeviceManagementCard(
 
             // Export pairing
             <div class="device-mgmt-row">
-                <ActionForm action=export_action>
-                    <input type="hidden" name="device_id" value=move || did.get() />
-                    <button type="submit" class="btn btn-secondary">
-                        "Export Pairing"
-                    </button>
-                </ActionForm>
-                {move || {
-                    export_action
-                        .value()
-                        .get()
-                        .map(|r| match r {
-                            Ok(_) => {
-                                view! { <span class="success">"Download started."</span> }
-                                    .into_any()
-                            }
-                            Err(e) => {
-                                view! { <span class="error">{e.to_string()}</span> }.into_any()
-                            }
-                        })
-                }}
+                <a
+                    class="btn btn-secondary"
+                    href=move || format!("/api/devices/{}/pairing", did.get())
+                    download="pairingFile.plist"
+                >
+                    "Export Pairing"
+                </a>
             </div>
 
             // Change IP

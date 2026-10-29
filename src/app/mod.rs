@@ -1299,27 +1299,6 @@ pub async fn delete_app(app_id: String) -> Result<(), ServerFnError> {
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 
-/// Return the decrypted pairing plist as base64 so the client can download it.
-#[server]
-pub async fn export_pairing(device_id: String) -> Result<String, ServerFnError> {
-    use base64::prelude::*;
-    use crate::server::{db, state::AppState};
-    use leptos::prelude::use_context;
-
-    let state = use_context::<AppState>().ok_or_else(|| ServerFnError::new("No state"))?;
-    let device = db::get_device(&state.db, &device_id)
-        .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?
-        .ok_or_else(|| ServerFnError::new("Device not found"))?;
-
-    let bytes = state
-        .crypto
-        .decrypt(&device.pairing_blob)
-        .map_err(|_| ServerFnError::new("Failed to decrypt pairing"))?;
-
-    Ok(BASE64_STANDARD.encode(&bytes))
-}
-
 /// Replace a device's pairing file after validating the new plist.
 #[server]
 pub async fn reimport_pairing(
