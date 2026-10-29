@@ -97,6 +97,14 @@ async fn main() {
         let state = app_state.clone();
         let leptos_options = leptos_options.clone();
         let app = Router::new()
+            .merge(
+                Router::new()
+                    .route(
+                        "/api/devices/{device_id}/pairing",
+                        axum::routing::get(jas::server::export_pairing_file),
+                    )
+                    .with_state(app_state.clone()),
+            )
             .leptos_routes_with_context(
                 &leptos_options,
                 routes,
