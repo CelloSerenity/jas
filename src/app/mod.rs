@@ -879,6 +879,7 @@ pub async fn list_apps(device_id: String) -> Result<Vec<AppInfo>, ServerFnError>
 
     Ok(rows
         .into_iter()
+        .filter(|r| r.installed_at.is_some())
         .map(|r| AppInfo {
             id: r.id,
             device_id: r.device_id,
