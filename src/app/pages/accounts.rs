@@ -303,10 +303,6 @@ pub fn Accounts() -> impl IntoView {
                             .into_any()
                     }
                     Ok(cert) => {
-                        let download_href = format!(
-                            "data:application/octet-stream;base64,{}",
-                            cert.p12_b64,
-                        );
                         // livecontainer://certificate?cert=<BASE64>&password=<PW>
                         // Base64 uses +, /, = which must be percent-encoded in a query string.
                         let lc_cert_encoded = cert.p12_b64
@@ -332,13 +328,12 @@ pub fn Accounts() -> impl IntoView {
                                     <a class="btn btn-primary" href=lc_href>
                                         "Add to LiveContainer"
                                     </a>
-                                    <a
-                                        class="btn btn-secondary"
-                                        href=download_href
-                                        download="ALTCertificate.p"
-                                    >
-                                        "Download ALTCertificate.p"
-                                    </a>
+                                    <form method="post" action="/api/certificates/download">
+                                        <input type="hidden" name="p12_b64" value=cert.p12_b64 />
+                                        <button type="submit" class="btn btn-secondary">
+                                            "Download ALTCertificate.p"
+                                        </button>
+                                    </form>
                                 </div>
                             </section>
                         }

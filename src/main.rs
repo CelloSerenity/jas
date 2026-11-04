@@ -103,6 +103,10 @@ async fn main() {
                         "/api/devices/{device_id}/pairing",
                         axum::routing::get(jas::server::export_pairing_file),
                     )
+                    .route(
+                        "/api/certificates/download",
+                        axum::routing::post(jas::server::download_certificate),
+                    )
                     .with_state(app_state.clone()),
             )
             .leptos_routes_with_context(
