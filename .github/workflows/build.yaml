@@ -28,12 +28,6 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Install OpenSSL on ubuntu-26.04-arm
-        if: matrix.os == 'ubuntu-26.04-arm'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev
-
       - name: Cache cargo registry and git dependencies
         uses: actions/cache@v5
         with:
