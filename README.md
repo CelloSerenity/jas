@@ -16,14 +16,13 @@ mDNS-discovered LAN devices)
 `isideload` crate
 - Refreshes installed apps before their 7-day developer certificate expires
 - Exposes a Leptos web portal for all of the above, using server functions for
-all backend communication
+portal communication
 
 ---
 
 ## Features
 
-- Leptos fullstack SSR portal - no separate frontend build step, no REST API layer,
-NO JAVASCRIPT >:(
+- Leptos fullstack SSR portal - no separate frontend build step, NO JAVASCRIPT >:(
 - SQLite-backed device registry, app tracking, certificate management, and job history
 - Static IP registration for VPN peers, with mDNS as a fast LAN-IP for those
 same devices
@@ -39,11 +38,24 @@ sign + install
 
 ---
 
+## macOS USB Companion
+
+The optional macOS app is a separate project. To enable JAS signing, set
+`JAS_COMPANION_TOKEN` in the JAS service environment to a random secret
+(for example, generate one with `openssl rand -hex 32`), then restart JAS.
+
+Use a device and Apple account already registered in JAS. In the companion,
+enable **Sign with JAS**, enter the JAS URL and token, and click **Load Accounts**.
+JAS stores the source IPA for future refreshes and records the install after
+the companion reports success.
+
+---
+
 ## Non-Goals
 
 - JAS does not manage WireGuard: it only reads the IPs you assign to devices.
-- JAS does not talk to `usbmuxd`. Every device is reached over TCP via its
-RPPairing file; lockdown-only devices are out of scope.
+- The JAS server reaches devices over TCP via their RPPairing files. The optional
+macOS companion handles USB separately.
 - JAS does not auto-register devices from mDNS. Discovery is a LAN-IP hint
 for already-registered devices, never a registration path.
 - JAS does not implement AltStore-style "sources" or a plugin ecosystem.

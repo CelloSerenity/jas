@@ -76,6 +76,8 @@ uuid = { version = "1", features = ["v4", "serde"], optional = true }
 anyhow = { version = "1", optional = true }
 sha2 = { version = "0.11", optional = true }
 hex = { version = "0.4", optional = true }
+constant_time_eq = { version = "0.6", optional = true }
+tempfile = { version = "3", optional = true }
 rootcause = { version = "0.12", optional = true }
 mdns-sd = { version = "0.21", optional = true }
 plist = { version = "1", optional = true }
@@ -111,6 +113,8 @@ ssr = [
   "dep:anyhow",
   "dep:sha2",
   "dep:hex",
+  "dep:constant_time_eq",
+  "dep:tempfile",
   "dep:rootcause",
   "dep:mdns-sd",
   "dep:plist",

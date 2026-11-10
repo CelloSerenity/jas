@@ -523,7 +523,7 @@ pub async fn get_dev_session(
     ))
 }
 
-fn create_ipa(app_path: &Path) -> anyhow::Result<Vec<u8>> {
+pub(super) fn create_ipa(app_path: &Path) -> anyhow::Result<Vec<u8>> {
     let app_name = app_path
         .file_name()
         .ok_or_else(|| anyhow::anyhow!("app_path has no filename"))?
@@ -632,7 +632,7 @@ pub fn read_ipa_info(ipa_bytes: &[u8]) -> anyhow::Result<IpaInfo> {
     })
 }
 
-fn read_bundle_id_from_app(app_path: &Path) -> anyhow::Result<String> {
+pub(super) fn read_bundle_id_from_app(app_path: &Path) -> anyhow::Result<String> {
     let info_path = app_path.join("Info.plist");
     let bytes = std::fs::read(&info_path)
         .map_err(|e| anyhow::anyhow!("read {}: {e}", info_path.display()))?;
@@ -642,6 +642,65 @@ fn read_bundle_id_from_app(app_path: &Path) -> anyhow::Result<String> {
         .and_then(|v| v.as_string())
         .map(|s| s.to_string())
         .ok_or_else(|| anyhow::anyhow!("CFBundleIdentifier missing from Info.plist"))
+}
+
+type JasSigner = Sideloader<MaxCertsCallbackBox, ExtensionsBehaviorCallbackBox>;
+
+pub(super) async fn build_signer(
+    pool: &SqlitePool,
+    crypto: &Crypto,
+    apple_id: &str,
+    encrypted_spd: &[u8],
+    anisette_url: &str,
+    max_certs_behavior: MaxCertsBehavior<MaxCertsCallbackBox>,
+) -> anyhow::Result<JasSigner> {
+    let db_storage = DbStorage::load(pool.clone(), &account_storage_prefix(apple_id))
+        .await
+        .map_err(|e| anyhow::anyhow!("Storage load failed: {e}"))?;
+
+    let dev_session = get_dev_session(pool, apple_id, encrypted_spd, crypto, anisette_url).await?;
+
+    let sideloader =
+        SideloaderBuilder::new(dev_session, apple_id.to_string())
+            .team_selection(TeamSelection::First)
+            .max_certs_behavior(max_certs_behavior)
+            .extensions_behavior(ExtensionsBehaviorSelection::Fixed(ExtensionsBehavior::ReuseMain))
+            .storage(Box::new(db_storage))
+            .machine_name("jas".to_string())
+            .build();
+    Ok(sideloader)
+}
+
+pub(super) async fn sign_ipa(
+    mut sideloader: JasSigner,
+    ipa_path: PathBuf,
+    device_name: &str,
+    device_udid: &str,
+    pairing_bytes: &[u8],
+) -> anyhow::Result<PathBuf> {
+    let team = sideloader
+        .get_team()
+        .await
+        .map_err(|e| anyhow::anyhow!("get_team failed: {e}"))?;
+    sideloader
+        .get_dev_session()
+        .ensure_device_registered(&team, device_name, device_udid, None)
+        .await
+        .map_err(|e| anyhow::anyhow!("ensure_device_registered failed: {e}"))?;
+
+    info!("Signing {}", ipa_path.display());
+    let (signed_path, _special) = sideloader
+        .sign_app(
+            ipa_path,
+            Some(team),
+            true,
+            None::<fn(f32) -> std::future::Ready<()>>,
+            Some(pairing_bytes),
+            Some(device_udid),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("sign_app failed: {e}"))?;
+    Ok(signed_path)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -660,20 +719,15 @@ pub async fn install_ipa(
     anisette_url: &str,
     progress_cb: impl Fn(u64, &'static str) + Send + 'static,
 ) -> anyhow::Result<(String, Option<chrono::DateTime<chrono::Utc>>)> {
-    let db_storage = DbStorage::load(pool.clone(), &account_storage_prefix(apple_id))
-        .await
-        .map_err(|e| anyhow::anyhow!("Storage load failed: {e}"))?;
-
-    let dev_session = get_dev_session(pool, apple_id, encrypted_spd, crypto, anisette_url).await?;
-
-    let mut sideloader: Sideloader<MaxCertsCallbackBox, ExtensionsBehaviorCallbackBox> =
-        SideloaderBuilder::new(dev_session, apple_id.to_string())
-            .team_selection(TeamSelection::First)
-            .max_certs_behavior(MaxCertsBehavior::Revoke)
-            .extensions_behavior(ExtensionsBehaviorSelection::Fixed(ExtensionsBehavior::ReuseMain))
-            .storage(Box::new(db_storage))
-            .machine_name("jas".to_string())
-            .build();
+    let sideloader = build_signer(
+        pool,
+        crypto,
+        apple_id,
+        encrypted_spd,
+        anisette_url,
+        MaxCertsBehavior::Revoke,
+    )
+    .await?;
 
     let pairing_bytes = crypto
         .decrypt(encrypted_pairing)
@@ -682,28 +736,14 @@ pub async fn install_ipa(
     let (mut handle, mut handshake) =
         open_cdtunnel_preferring_mdns(device_ip, mdns_ip, &pairing_bytes).await?;
 
-    let team = sideloader
-        .get_team()
-        .await
-        .map_err(|e| anyhow::anyhow!("get_team failed: {e}"))?;
-    sideloader
-        .get_dev_session()
-        .ensure_device_registered(&team, device_name, device_udid, None)
-        .await
-        .map_err(|e| anyhow::anyhow!("ensure_device_registered failed: {e}"))?;
-
-    info!("Signing {ipa_path}");
-    let (signed_path, _special) = sideloader
-        .sign_app(
-            PathBuf::from(ipa_path),
-            Some(team),
-            true,
-            None::<fn(f32) -> std::future::Ready<()>>,
-            Some(&pairing_bytes),
-            Some(device_udid),
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("sign_app failed: {e}"))?;
+    let signed_path = sign_ipa(
+        sideloader,
+        PathBuf::from(ipa_path),
+        device_name,
+        device_udid,
+        &pairing_bytes,
+    )
+    .await?;
 
     let refresh_profile = if verify_refresh {
         let bytes = tokio::fs::read(signed_path.join("embedded.mobileprovision")).await?;

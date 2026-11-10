@@ -109,6 +109,7 @@ async fn main() {
                     )
                     .with_state(app_state.clone()),
             )
+            .merge(jas::server::companion::routes(app_state.clone()))
             .leptos_routes_with_context(
                 &leptos_options,
                 routes,
