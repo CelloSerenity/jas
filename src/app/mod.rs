@@ -1194,6 +1194,31 @@ pub async fn list_jobs() -> Result<Vec<QueueEntry>, ServerFnError> {
 }
 
 #[server]
+pub async fn cancel_job(job_id: String) -> Result<(), ServerFnError> {
+    use crate::server::{db, state::AppState};
+
+    let state = use_context::<AppState>().ok_or_else(|| ServerFnError::new("No state"))?;
+    db::cancel_job(&state.db, &job_id)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    Ok(())
+}
+
+#[server]
+pub async fn delete_job(job_id: String) -> Result<(), ServerFnError> {
+    use crate::server::{db, state::AppState};
+
+    let state = use_context::<AppState>().ok_or_else(|| ServerFnError::new("No state"))?;
+    if !db::delete_finished_job(&state.db, &job_id)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?
+    {
+        return Err(ServerFnError::new("Only finished jobs can be deleted"));
+    }
+    Ok(())
+}
+
+#[server]
 pub async fn job_status(job_id: String) -> Result<JobInfo, ServerFnError> {
     use crate::server::{db, state::AppState};
     use leptos::prelude::use_context;
