@@ -3,9 +3,8 @@ use std::{io::Cursor, path::PathBuf};
 use anyhow::Context;
 use axum::{
     body::Bytes,
-    extract::{DefaultBodyLimit, Request, State},
+    extract::{DefaultBodyLimit, State},
     http::{header, HeaderMap, StatusCode},
-    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -44,15 +43,6 @@ struct Completion {
 }
 
 pub fn routes<S: Clone + Send + Sync + 'static>(app: AppState) -> Router<S> {
-    let Ok(token) = std::env::var("JAS_COMPANION_TOKEN") else {
-        return Router::new();
-    };
-    if token.len() < 32 {
-        tracing::warn!("JAS_COMPANION_TOKEN is too short. Companion API disabled.");
-        return Router::new();
-    }
-    let token_hash: [u8; 32] = Sha256::digest(format!("Bearer {token}")).into();
-
     Router::new()
         .route("/api/companion/install", get(accounts).post(prepare))
         .layer(DefaultBodyLimit::max(512 * 1024 * 1024))
@@ -60,23 +50,6 @@ pub fn routes<S: Clone + Send + Sync + 'static>(app: AppState) -> Router<S> {
             "/api/companion/complete",
             post(complete).layer(DefaultBodyLimit::max(4096)),
         )
-        .route_layer(middleware::from_fn(
-            move |request: Request, next: Next| async move {
-                let authorized =
-                    request
-                        .headers()
-                        .get(header::AUTHORIZATION)
-                        .is_some_and(|value| {
-                            let hash: [u8; 32] = Sha256::digest(value.as_bytes()).into();
-                            constant_time_eq::constant_time_eq_32(&hash, &token_hash)
-                        });
-                if authorized {
-                    next.run(request).await
-                } else {
-                    (StatusCode::UNAUTHORIZED, "Invalid JAS companion token").into_response()
-                }
-            },
-        ))
         .with_state(CompanionState {
             app,
             receipts: Crypto::new(rand::random()),

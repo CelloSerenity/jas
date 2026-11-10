@@ -38,14 +38,12 @@ sign + install
 
 ---
 
-## macOS USB Companion
+## USB Companion
 
-The optional macOS app is a separate project. To enable JAS signing, set
-`JAS_COMPANION_TOKEN` in the JAS service environment to a random secret
-(for example, generate one with `openssl rand -hex 32`), then restart JAS.
+The companion is a separate app. Use a device and Apple account already
+registered in JAS. In the companion, enable **Sign with JAS**, enter the JAS URL,
+and click **Load Accounts**.
 
-Use a device and Apple account already registered in JAS. In the companion,
-enable **Sign with JAS**, enter the JAS URL and token, and click **Load Accounts**.
 JAS stores the source IPA for future refreshes and records the install after
 the companion reports success.
 
@@ -55,7 +53,7 @@ the companion reports success.
 
 - JAS does not manage WireGuard: it only reads the IPs you assign to devices.
 - The JAS server reaches devices over TCP via their RPPairing files. The optional
-macOS companion handles USB separately.
+companion app handles USB separately.
 - JAS does not auto-register devices from mDNS. Discovery is a LAN-IP hint
 for already-registered devices, never a registration path.
 - JAS does not implement AltStore-style "sources" or a plugin ecosystem.
@@ -412,8 +410,8 @@ mdns_interface = ""   # empty = all interfaces
 Raw values never touch SQLite unencrypted.
 - **Apple ID passwords** are not stored after the initial auth handshake.
 Only the session token is persisted.
-- **The web portal has no built-in authentication.** It is intended to be
-deployed behind a NAT.
+- **The web portal and companion API have no built-in authentication.** Keep
+  both on a trusted network.
 - Jackson has no clue what he's doing, use at your own risk
 
 ---

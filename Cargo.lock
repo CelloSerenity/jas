@@ -2148,7 +2148,6 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "console_error_panic_hook",
- "constant_time_eq",
  "hex",
  "idevice",
  "isideload",
