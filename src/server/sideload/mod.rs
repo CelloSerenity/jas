@@ -497,6 +497,7 @@ pub fn read_ipa_info(ipa_bytes: &[u8]) -> anyhow::Result<IpaInfo> {
                 .by_index(i)
                 .map_err(|e| anyhow::anyhow!("zip entry {i}: {e}"))?
                 .name()
+                .map_err(|e| anyhow::anyhow!("zip entry {i} name: {e}"))?
                 .to_string();
             if let Some(rest) = name.strip_prefix("Payload/") {
                 if let Some((app_dir, tail)) = rest.split_once('/') {

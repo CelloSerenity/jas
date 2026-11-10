@@ -53,13 +53,14 @@ pub async fn run_mdns(state: AppState) {
             | ServiceEvent::ServiceFound(_, _)
             | ServiceEvent::ServiceRemoved(_, _)
             | ServiceEvent::SearchStopped(_) => {}
+            _ => {}
         }
     }
 
     warn!("mDNS: event channel closed, discovery task exiting");
 }
 
-async fn handle_resolved(state: &AppState, info: &mdns_sd::ServiceInfo) {
+async fn handle_resolved(state: &AppState, info: &mdns_sd::ResolvedService) {
     let identifier = match info.get_property_val_str("identifier") {
         Some(s) => s,
         None => return,
@@ -132,17 +133,15 @@ async fn handle_resolved(state: &AppState, info: &mdns_sd::ServiceInfo) {
     debug!("mDNS: no registered device matches identifier {identifier}");
 }
 
-fn pick_ip(info: &mdns_sd::ServiceInfo) -> Option<IpAddr> {
-    let addrs = info.get_addresses();
+fn pick_ip(info: &mdns_sd::ResolvedService) -> Option<IpAddr> {
+    let addrs = info.get_addresses().iter().map(|addr| addr.to_ip_addr());
     addrs
-        .iter()
+        .clone()
         .find(|a| matches!(a, IpAddr::V4(_)))
-        .copied()
         .or_else(|| {
             addrs
-                .iter()
+                .clone()
                 .find(|a| matches!(a, IpAddr::V6(v6) if !v6.is_unicast_link_local()))
-                .copied()
         })
-        .or_else(|| addrs.iter().next().copied())
+        .or_else(|| addrs.clone().next())
 }
